@@ -5,6 +5,7 @@ import os from 'os'
 import * as pty from 'node-pty'
 import type { IPty } from 'node-pty'
 import { getAvailableCommands } from './commands'
+import icon from '../../resources/icon.png?asset'
 
 interface ShellDef {
   name: string
@@ -85,6 +86,7 @@ function createWindow(): void {
     height: 700,
     minWidth: 480,
     minHeight: 320,
+    icon,
     show: false,
     frame: false,
     backgroundColor: '#0b0d14',

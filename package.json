@@ -19,10 +19,20 @@
     "appId": "com.ahmadsadiq.as21tershell",
     "productName": "AS21 Tershell",
     "files": [
-      "out/**/*"
+      "out/**/*",
+      "resources/**"
+    ],
+    "asarUnpack": [
+      "resources/**"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     }
   },
   "dependencies": {

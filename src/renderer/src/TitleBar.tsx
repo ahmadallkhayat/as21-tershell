@@ -22,6 +22,8 @@ import {
   SpinnerIcon
 } from './Icon'
 import { useClampToViewport } from './useClampToViewport'
+import { useDragScroll } from './useDragScroll'
+import iconUrl from '../../../resources/icon.png'
 
 interface Tab {
   id: string
@@ -89,8 +91,11 @@ export default function TitleBar({
   const [maximized, setMaximized] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [installedCommands, setInstalledCommands] = useState<string[] | null>(null)
+  const tabsRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const menuPopupRef = useRef<HTMLDivElement>(null)
+
+  useDragScroll(tabsRef)
 
   useClampToViewport(menuPopupRef, menuOpen, [installedCommands])
 
@@ -116,10 +121,14 @@ export default function TitleBar({
   return (
     <div className="relative z-10 flex h-9 shrink-0 items-center justify-between border-b border-line bg-titlebar shadow-[0_2px_12px_rgba(0,0,0,0.35)] [-webkit-app-region:drag]">
       <div className="flex h-full min-w-0 flex-1 items-center gap-3 pl-2.5">
-        <span className="shrink-0 text-xs font-semibold tracking-wide text-muted">
-          AS21 Tershell
-        </span>
-        <div className="tabs flex h-full min-w-0 shrink items-center gap-1 overflow-x-auto overflow-y-hidden [-webkit-app-region:no-drag]">
+        <div className="flex shrink-0 items-center gap-2">
+          <img src={iconUrl} alt="" draggable={false} className="h-4 w-4 rounded-[3px]" />
+          <span className="text-xs font-semibold tracking-wide text-muted">AS21 Tershell</span>
+        </div>
+        <div
+          ref={tabsRef}
+          className="tabs flex h-full min-w-0 shrink items-center gap-1 overflow-x-auto overflow-y-hidden [-webkit-app-region:no-drag]"
+        >
           {tabs.map((tab) => (
             <div
               key={tab.id}

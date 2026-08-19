@@ -87,22 +87,19 @@ body {
   user-select: none;
 }
 
+/* No scrollbar UI on the tab strip - it is panned by dragging instead
+   (see useDragScroll). */
 .tabs {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-hover-strong) transparent;
+  scrollbar-width: none;
 }
 
 .tabs::-webkit-scrollbar {
-  height: 4px;
+  display: none;
 }
 
-.tabs::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.tabs::-webkit-scrollbar-thumb {
-  background: var(--color-hover-strong);
-  border-radius: 4px;
+.tabs.dragging,
+.tabs.dragging * {
+  cursor: grabbing;
 }
 
 .terminal-container .xterm-viewport {
