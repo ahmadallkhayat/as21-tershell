@@ -7,7 +7,7 @@ import { commitToHistory, getSuggestions, loadHistory } from './suggestions'
 import SuggestionDropdown from './SuggestionDropdown'
 import ContextMenu from './ContextMenu'
 import SearchBar from './SearchBar'
-import type { Settings } from './settings'
+import { resolveThemeMode, TERMINAL_COLORS, type Settings } from './settings'
 
 const SEARCH_OPTIONS: ISearchOptions = {
   decorations: {
@@ -130,8 +130,7 @@ export default function TerminalView({
       fontFamily: settings.fontFamily,
       fontSize: settings.fontSize,
       theme: {
-        background: '#0b0d14',
-        foreground: '#d8dae8',
+        ...TERMINAL_COLORS[resolveThemeMode(settings.themeMode)],
         cursor: settings.accentColor
       }
     })
@@ -354,9 +353,27 @@ export default function TerminalView({
     term.options.fontFamily = settings.fontFamily
     term.options.fontSize = settings.fontSize
     term.options.cursorStyle = settings.cursorStyle
-    term.options.theme = { ...term.options.theme, cursor: settings.accentColor }
+    term.options.theme = {
+      ...TERMINAL_COLORS[resolveThemeMode(settings.themeMode)],
+      cursor: settings.accentColor
+    }
     fitRef.current?.fit()
     if (ptyIdRef.current) window.api.resize(ptyIdRef.current, term.cols, term.rows)
+  }, [settings])
+
+  useEffect(() => {
+    if (settings.themeMode !== 'system') return
+    const media = window.matchMedia('(prefers-color-scheme: light)')
+    const onChange = (): void => {
+      const term = termRef.current
+      if (!term) return
+      term.options.theme = {
+        ...TERMINAL_COLORS[resolveThemeMode(settings.themeMode)],
+        cursor: settings.accentColor
+      }
+    }
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
   }, [settings])
 
   useEffect(() => {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import TitleBar from './TitleBar'
 import PaneView, { type PaneActions } from './PaneView'
 import SettingsPanel from './SettingsPanel'
-import { applyAccentColor, loadSettings, saveSettings, type Settings } from './settings'
+import { applyAccentColor, applyThemeMode, loadSettings, saveSettings, type Settings } from './settings'
 import {
   type PaneNode,
   createLeaf,
@@ -33,6 +33,10 @@ export default function App(): JSX.Element {
   useEffect(() => {
     applyAccentColor(settings.accentColor)
   }, [settings.accentColor])
+
+  useEffect(() => {
+    applyThemeMode(settings.themeMode)
+  }, [settings.themeMode])
 
   const updateSettings = useCallback((next: Settings) => {
     setSettings(next)

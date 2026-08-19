@@ -121,7 +121,7 @@ export default function TitleBar({
               key={tab.id}
               className={`flex h-[30px] cursor-pointer items-center gap-2 whitespace-nowrap rounded-t-md border-b-2 pl-2.5 pr-2 text-xs ${
                 tab.id === activeId
-                  ? 'border-accent bg-hover text-bright'
+                  ? 'border-accent bg-accent-soft text-bright'
                   : 'border-transparent text-muted hover:bg-hover/60 hover:text-fg'
               }`}
               onClick={() => onSelect(tab.id)}
@@ -146,7 +146,7 @@ export default function TitleBar({
         <div className="relative shrink-0 [-webkit-app-region:no-drag]" ref={menuRef}>
           <button
             type="button"
-            className="flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-accent"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-accent-soft hover:text-accent"
             title="New tab"
             onClick={() => setMenuOpen((v) => !v)}
           >
@@ -158,7 +158,7 @@ export default function TitleBar({
                 <button
                   key={s.key}
                   type="button"
-                  className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-hover-strong"
+                  className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
                   onClick={() => {
                     onAdd(s.key)
                     setMenuOpen(false)
@@ -180,7 +180,7 @@ export default function TitleBar({
                   <button
                     key={tool.id}
                     type="button"
-                    className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-hover-strong"
+                    className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
                     onClick={() => {
                       if (installed) {
                         onAdd('powershell', tool.checkCommand, tool.name, tool.id)
@@ -192,7 +192,7 @@ export default function TitleBar({
                   >
                     <LogoIcon
                       className={`h-3 w-3 shrink-0 ${
-                        checking ? 'animate-pulse text-hover-strong' : installed ? 'text-fg' : 'text-hover-strong'
+                        checking ? 'animate-pulse text-hover-strong' : installed ? 'text-accent' : 'text-hover-strong'
                       }`}
                     />
                     <span className={`flex-1 ${checking ? 'animate-pulse' : ''}`}>{tool.name}</span>

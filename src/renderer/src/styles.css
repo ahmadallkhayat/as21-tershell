@@ -2,22 +2,73 @@
 
 :root {
   --user-accent: #7c6cff;
+
+  /* Dark palette (default) */
+  --surface: #0b0d14;
+  --titlebar: #12141f;
+  --line: #242838;
+  --hover: #1a1d2b;
+  --hover-strong: #2a2e42;
+  --muted: #8b90a8;
+  --fg: #d8dae8;
+  --bright: #f4f5fc;
+  --cyan: #34e2e2;
+  --danger: #ff5d5d;
+  --powershell: #5b9dff;
+  --cmd: #ffb454;
+}
+
+/* System preference, only when no explicit choice has been made */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --surface: #f7f7fb;
+    --titlebar: #ffffff;
+    --line: #e3e4ec;
+    --hover: #edeef4;
+    --hover-strong: #dcdee8;
+    --muted: #6b7086;
+    --fg: #23253a;
+    --bright: #0a0b14;
+    --cyan: #0e7c8c;
+    --danger: #dc2626;
+    --powershell: #2563eb;
+    --cmd: #b45309;
+  }
+}
+
+/* Explicit light mode always wins */
+:root[data-theme='light'] {
+  --surface: #f7f7fb;
+  --titlebar: #ffffff;
+  --line: #e3e4ec;
+  --hover: #edeef4;
+  --hover-strong: #dcdee8;
+  --muted: #6b7086;
+  --fg: #23253a;
+  --bright: #0a0b14;
+  --cyan: #0e7c8c;
+  --danger: #dc2626;
+  --powershell: #2563eb;
+  --cmd: #b45309;
 }
 
 @theme {
-  --color-surface: #0b0d14;
-  --color-titlebar: #12141f;
-  --color-line: #242838;
-  --color-hover: #1a1d2b;
-  --color-hover-strong: #2a2e42;
-  --color-muted: #8b90a8;
-  --color-fg: #d8dae8;
-  --color-bright: #f4f5fc;
+  --color-surface: var(--surface);
+  --color-titlebar: var(--titlebar);
+  --color-line: var(--line);
+  --color-hover: var(--hover);
+  --color-hover-strong: var(--hover-strong);
+  --color-muted: var(--muted);
+  --color-fg: var(--fg);
+  --color-bright: var(--bright);
   --color-accent: var(--user-accent);
-  --color-cyan: #34e2e2;
-  --color-danger: #ff5d5d;
-  --color-powershell: #5b9dff;
-  --color-cmd: #ffb454;
+  --color-accent-soft: color-mix(in srgb, var(--user-accent) 16%, var(--surface));
+  --color-accent-line: color-mix(in srgb, var(--user-accent) 45%, var(--line));
+  --color-accent-fg: color-mix(in srgb, var(--user-accent) 92%, white);
+  --color-cyan: var(--cyan);
+  --color-danger: var(--danger);
+  --color-powershell: var(--powershell);
+  --color-cmd: var(--cmd);
   --font-ui: 'Segoe UI', system-ui, sans-serif;
 }
 
