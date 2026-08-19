@@ -1,3 +1,6 @@
+import { useRef } from 'react'
+import { useClampToViewport } from './useClampToViewport'
+
 interface Props {
   x: number
   y: number
@@ -19,8 +22,12 @@ export default function ContextMenu({
   onSplitDown,
   onClosePane
 }: Props): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null)
+  useClampToViewport(ref, true, [x, y])
+
   return (
     <div
+      ref={ref}
       className="absolute z-30 min-w-[160px] overflow-hidden rounded-md border border-hover-strong bg-hover shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
       style={{ left: x, top: y }}
     >

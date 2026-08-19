@@ -21,6 +21,7 @@ import {
   RestoreIcon,
   SpinnerIcon
 } from './Icon'
+import { useClampToViewport } from './useClampToViewport'
 
 interface Tab {
   id: string
@@ -89,6 +90,9 @@ export default function TitleBar({
   const [menuOpen, setMenuOpen] = useState(false)
   const [installedCommands, setInstalledCommands] = useState<string[] | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const menuPopupRef = useRef<HTMLDivElement>(null)
+
+  useClampToViewport(menuPopupRef, menuOpen, [installedCommands])
 
   useEffect(() => window.api.window.onMaximizedChange(setMaximized), [])
 
@@ -153,7 +157,10 @@ export default function TitleBar({
             <PlusIcon />
           </button>
           {menuOpen && (
-            <div className="absolute left-0 top-full z-10 mt-1 w-max overflow-hidden rounded-md border border-hover-strong bg-hover shadow-lg">
+            <div
+              ref={menuPopupRef}
+              className="absolute left-0 top-full z-10 mt-1 w-max overflow-hidden rounded-md border border-hover-strong bg-hover shadow-lg"
+            >
               {shellOptions.map((s) => (
                 <button
                   key={s.key}

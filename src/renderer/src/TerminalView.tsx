@@ -42,7 +42,8 @@ interface DropdownState {
   items: string[]
   selected: number
   x: number
-  y: number
+  lineTop: number
+  lineBottom: number
 }
 
 interface ContextMenuState {
@@ -51,18 +52,39 @@ interface ContextMenuState {
   canCopy: boolean
 }
 
-function getCellSize(term: Terminal, container: HTMLElement): { width: number; height: number } {
-  const rect = container.getBoundingClientRect()
-  return {
-    width: term.cols > 0 ? rect.width / term.cols : 9,
-    height: term.rows > 0 ? rect.height / term.rows : 17
-  }
-}
+/**
+ * The cursor cell's box in pixels, relative to `wrapper` (the positioned
+ * ancestor the dropdown is absolutely placed within). The dropdown needs the
+ * full line box — not just a point — so it can sit clear of the line whether
+ * it opens below or flips above it.
+ *
+ * Measures against xterm's own `.xterm-screen` element rather than our
+ * container: the screen's box is exactly cols x rows cells, so dividing it
+ * gives the true cell size with no drift across long lines, and its offset
+ * accounts for the wrapper's padding automatically.
+ */
+function getCursorAnchor(
+  term: Terminal,
+  container: HTMLElement,
+  wrapper: HTMLElement
+): { x: number; lineTop: number; lineBottom: number } {
+  const screen = container.querySelector('.xterm-screen') as HTMLElement | null
+  const target = screen ?? container
+  const targetRect = target.getBoundingClientRect()
+  const wrapperRect = wrapper.getBoundingClientRect()
 
-function getCursorPixelPos(term: Terminal, container: HTMLElement): { x: number; y: number } {
-  const { width, height } = getCellSize(term, container)
+  const cellWidth = term.cols > 0 ? targetRect.width / term.cols : 9
+  const cellHeight = term.rows > 0 ? targetRect.height / term.rows : 17
   const buf = term.buffer.active
-  return { x: buf.cursorX * width, y: (buf.cursorY + 1) * height + 10 }
+
+  const offsetX = targetRect.left - wrapperRect.left
+  const offsetY = targetRect.top - wrapperRect.top
+
+  return {
+    x: offsetX + buf.cursorX * cellWidth,
+    lineTop: offsetY + buf.cursorY * cellHeight,
+    lineBottom: offsetY + (buf.cursorY + 1) * cellHeight
+  }
 }
 
 export default function TerminalView({
@@ -83,6 +105,7 @@ export default function TerminalView({
   onFocusAdjacent
 }: Props): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const ptyIdRef = useRef<string | null>(null)
@@ -232,8 +255,10 @@ export default function TerminalView({
         closeDropdown()
         return
       }
-      const pos = getCursorPixelPos(term, container)
-      setDropdown({ items, selected: 0, x: pos.x, y: pos.y })
+      const wrapper = wrapperRef.current
+      if (!wrapper) return
+      const anchor = getCursorAnchor(term, container, wrapper)
+      setDropdown({ items, selected: 0, ...anchor })
     }
 
     // Cursor position only reflects reality after the pty echoes the
@@ -435,6 +460,7 @@ export default function TerminalView({
 
   return (
     <div
+      ref={wrapperRef}
       className="terminal-container absolute inset-0 p-2"
       style={{ display: visible ? 'block' : 'none' }}
       onContextMenu={(e) => {
@@ -453,7 +479,8 @@ export default function TerminalView({
           items={dropdown.items}
           selectedIndex={dropdown.selected}
           x={dropdown.x}
-          y={dropdown.y}
+          lineTop={dropdown.lineTop}
+          lineBottom={dropdown.lineBottom}
           onSelect={(i) => acceptRef.current(i)}
         />
       )}

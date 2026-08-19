@@ -1,5 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ACCENT_PRESETS } from './settings'
+import { useClampToViewport } from './useClampToViewport'
+import { TextInput } from './ui'
 
 interface Props {
   value: string
@@ -47,16 +50,28 @@ function isValidHex(hex: string): boolean {
 export default function ColorPicker({ value, onChange }: Props): JSX.Element {
   const [open, setOpen] = useState(false)
   const [hexDraft, setHexDraft] = useState(value)
+  const [anchor, setAnchor] = useState({ left: 0, top: 0 })
   const trackRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef(false)
-  const wrapRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const popupRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => setHexDraft(value), [value])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const rect = buttonRef.current?.getBoundingClientRect()
+    if (rect) setAnchor({ left: rect.left, top: rect.bottom + 6 })
+  }, [open])
+
+  useClampToViewport(popupRef, open, [anchor])
 
   useEffect(() => {
     if (!open) return
     const close = (e: MouseEvent): void => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (buttonRef.current?.contains(target) || popupRef.current?.contains(target)) return
+      setOpen(false)
     }
     document.addEventListener('mousedown', close)
     return () => document.removeEventListener('mousedown', close)
@@ -78,8 +93,9 @@ export default function ColorPicker({ value, onChange }: Props): JSX.Element {
   }
 
   return (
-    <div className="relative" ref={wrapRef}>
+    <>
       <button
+        ref={buttonRef}
         type="button"
         className="flex items-center gap-2 rounded-md border border-hover-strong bg-hover px-2 py-1.5 hover:border-accent-line"
         onClick={() => setOpen((v) => !v)}
@@ -91,61 +107,71 @@ export default function ColorPicker({ value, onChange }: Props): JSX.Element {
         <span className="text-xs text-fg">{value}</span>
       </button>
 
-      {open && (
-        <div className="absolute left-0 top-full z-50 mt-1.5 w-56 rounded-lg border border-hover-strong bg-titlebar p-3 shadow-[0_16px_40px_rgba(0,0,0,0.5)]">
-          <div className="mb-3 grid grid-cols-5 gap-2">
-            {ACCENT_PRESETS.map((preset) => (
-              <button
-                key={preset}
-                type="button"
-                title={preset}
-                className={`h-6 w-6 rounded-full border-2 ${
-                  preset.toLowerCase() === value.toLowerCase() ? 'border-bright' : 'border-transparent'
-                }`}
-                style={{ backgroundColor: preset }}
-                onClick={() => onChange(preset)}
-              />
-            ))}
-          </div>
-
+      {open &&
+        createPortal(
           <div
-            ref={trackRef}
-            className="relative mb-3 h-3 cursor-pointer rounded-full"
-            style={{
-              background:
-                'linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)'
-            }}
-            onPointerDown={(e) => {
-              draggingRef.current = true
-              e.currentTarget.setPointerCapture(e.pointerId)
-              setHueFromClientX(e.clientX)
-            }}
-            onPointerMove={(e) => {
-              if (draggingRef.current) setHueFromClientX(e.clientX)
-            }}
-            onPointerUp={(e) => {
-              draggingRef.current = false
-              e.currentTarget.releasePointerCapture(e.pointerId)
-            }}
+            ref={popupRef}
+            className="fixed z-[60] w-56 rounded-lg border border-hover-strong bg-titlebar p-3 shadow-[0_16px_40px_rgba(0,0,0,0.5)]"
+            style={{ left: anchor.left, top: anchor.top }}
           >
-            <div
-              className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)]"
-              style={{ left: `${(hue / 360) * 100}%`, backgroundColor: hslToHex(hue, PICKER_SATURATION, PICKER_LIGHTNESS) }}
-            />
-          </div>
+            <div className="mb-3 grid grid-cols-5 gap-2">
+              {ACCENT_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  title={preset}
+                  className={`h-6 w-6 rounded-full border-2 ${
+                    preset.toLowerCase() === value.toLowerCase()
+                      ? 'border-bright'
+                      : 'border-transparent'
+                  }`}
+                  style={{ backgroundColor: preset }}
+                  onClick={() => onChange(preset)}
+                />
+              ))}
+            </div>
 
-          <input
-            value={hexDraft}
-            onChange={(e) => setHexDraft(e.target.value)}
-            onBlur={commitHexDraft}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitHexDraft()
-            }}
-            spellCheck={false}
-            className="w-full rounded border border-hover-strong bg-hover px-2 py-1 text-xs text-fg outline-none focus:border-accent-line"
-          />
-        </div>
-      )}
-    </div>
+            <div
+              ref={trackRef}
+              className="relative mb-3 h-3 cursor-pointer rounded-full"
+              style={{
+                background:
+                  'linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)'
+              }}
+              onPointerDown={(e) => {
+                draggingRef.current = true
+                e.currentTarget.setPointerCapture(e.pointerId)
+                setHueFromClientX(e.clientX)
+              }}
+              onPointerMove={(e) => {
+                if (draggingRef.current) setHueFromClientX(e.clientX)
+              }}
+              onPointerUp={(e) => {
+                draggingRef.current = false
+                e.currentTarget.releasePointerCapture(e.pointerId)
+              }}
+            >
+              <div
+                className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)]"
+                style={{
+                  left: `${(hue / 360) * 100}%`,
+                  backgroundColor: hslToHex(hue, PICKER_SATURATION, PICKER_LIGHTNESS)
+                }}
+              />
+            </div>
+
+            <TextInput
+              value={hexDraft}
+              onChange={setHexDraft}
+              onBlur={commitHexDraft}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitHexDraft()
+              }}
+              className="w-full"
+            />
+          </div>,
+          document.body
+        )}
+    </>
   )
 }

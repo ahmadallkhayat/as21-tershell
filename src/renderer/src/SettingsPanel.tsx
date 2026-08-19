@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { FONT_OPTIONS, type Settings, type ThemeMode } from './settings'
 import ColorPicker from './ColorPicker'
 import { CloseIcon } from './Icon'
+import { NumberInput, SegmentedControl, Select } from './ui'
 
 interface ShellOption {
   key: string
@@ -29,15 +30,12 @@ function SectionLabel({ children }: { children: ReactNode }): JSX.Element {
 
 function Field({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
-    <label className="flex items-center justify-between gap-4 py-1.5">
+    <div className="flex items-center justify-between gap-4 py-1.5">
       <span className="text-xs text-fg">{label}</span>
       {children}
-    </label>
+    </div>
   )
 }
-
-const SELECT_CLASS =
-  'rounded-md border border-hover-strong bg-hover px-2 py-1.5 text-xs text-fg outline-none focus:border-accent-line'
 
 export default function SettingsPanel({ settings, shells, onChange, onClose }: Props): JSX.Element {
   const update = <K extends keyof Settings>(key: K, value: Settings[K]): void => {
@@ -67,22 +65,15 @@ export default function SettingsPanel({ settings, shells, onChange, onClose }: P
           <SectionLabel>Appearance</SectionLabel>
 
           <Field label="Theme">
-            <div className="flex overflow-hidden rounded-md border border-hover-strong">
-              {(['dark', 'light', 'system'] as ThemeMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={`px-2.5 py-1 text-[11px] capitalize ${
-                    settings.themeMode === mode
-                      ? 'bg-accent text-white'
-                      : 'bg-hover text-muted hover:bg-hover-strong hover:text-fg'
-                  }`}
-                  onClick={() => update('themeMode', mode)}
-                >
-                  {mode}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl<ThemeMode>
+              value={settings.themeMode}
+              options={[
+                { value: 'dark', label: 'Dark' },
+                { value: 'light', label: 'Light' },
+                { value: 'system', label: 'System' }
+              ]}
+              onChange={(mode) => update('themeMode', mode)}
+            />
           </Field>
 
           <Field label="Accent color">
@@ -92,56 +83,45 @@ export default function SettingsPanel({ settings, shells, onChange, onClose }: P
           <SectionLabel>Terminal</SectionLabel>
 
           <Field label="Font family">
-            <select
+            <Select
               value={settings.fontFamily}
-              onChange={(e) => update('fontFamily', e.target.value)}
-              className={SELECT_CLASS}
-            >
-              {FONT_OPTIONS.map((f) => (
-                <option key={f} value={f}>
-                  {fontLabel(f)}
-                </option>
-              ))}
-            </select>
+              options={FONT_OPTIONS.map((f) => ({ value: f, label: fontLabel(f) }))}
+              onChange={(f) => update('fontFamily', f)}
+              minWidth={170}
+            />
           </Field>
 
           <Field label="Font size">
-            <input
-              type="number"
+            <NumberInput
+              value={settings.fontSize}
               min={8}
               max={32}
-              value={settings.fontSize}
-              onChange={(e) => update('fontSize', Number(e.target.value) || settings.fontSize)}
-              className={`w-16 text-right ${SELECT_CLASS}`}
+              onChange={(n) => update('fontSize', n)}
             />
           </Field>
 
           <Field label="Cursor style">
-            <select
+            <Select
               value={settings.cursorStyle}
-              onChange={(e) => update('cursorStyle', e.target.value as Settings['cursorStyle'])}
-              className={SELECT_CLASS}
-            >
-              <option value="block">Block</option>
-              <option value="bar">Bar</option>
-              <option value="underline">Underline</option>
-            </select>
+              options={[
+                { value: 'block', label: 'Block' },
+                { value: 'bar', label: 'Bar' },
+                { value: 'underline', label: 'Underline' }
+              ]}
+              onChange={(v) => update('cursorStyle', v as Settings['cursorStyle'])}
+              minWidth={130}
+            />
           </Field>
 
           <SectionLabel>Behavior</SectionLabel>
 
           <Field label="Default shell">
-            <select
+            <Select
               value={settings.defaultShell}
-              onChange={(e) => update('defaultShell', e.target.value)}
-              className={SELECT_CLASS}
-            >
-              {shells.map((s) => (
-                <option key={s.key} value={s.key}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+              options={shells.map((s) => ({ value: s.key, label: s.name }))}
+              onChange={(v) => update('defaultShell', v)}
+              minWidth={170}
+            />
           </Field>
         </div>
       </div>
