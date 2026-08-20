@@ -1,5 +1,10 @@
-const HISTORY_KEY = 'as21-tershell:history'
 const MAX_HISTORY = 200
+
+// Namespaced per shell so cmd suggestions don't bleed into PowerShell panes
+// and vice versa.
+function historyKey(shellKey: string): string {
+  return `as21-tershell:history:${shellKey}`
+}
 
 // Handy multi-word snippets that a plain PATH/cmdlet scan wouldn't surface.
 const COMMON_SNIPPETS = [
@@ -27,26 +32,32 @@ window.api.listCommands().then((list) => {
   systemCommands = list
 })
 
-export function loadHistory(): string[] {
+// Always read fresh from storage rather than trusting an in-memory copy a
+// caller might be holding — a command run in one pane should show up in
+// every other open pane's suggestions immediately, not only after that
+// pane is recreated.
+export function loadHistory(shellKey: string): string[] {
   try {
-    const raw = localStorage.getItem(HISTORY_KEY)
+    const raw = localStorage.getItem(historyKey(shellKey))
     return raw ? (JSON.parse(raw) as string[]) : []
   } catch {
     return []
   }
 }
 
-export function commitToHistory(history: string[], line: string): string[] {
+export function commitToHistory(shellKey: string, line: string): string[] {
   const trimmed = line.trim()
-  if (!trimmed) return history
-  const next = [trimmed, ...history.filter((h) => h !== trimmed)].slice(0, MAX_HISTORY)
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(next))
+  const current = loadHistory(shellKey)
+  if (!trimmed) return current
+  const next = [trimmed, ...current.filter((h) => h !== trimmed)].slice(0, MAX_HISTORY)
+  localStorage.setItem(historyKey(shellKey), JSON.stringify(next))
   return next
 }
 
-export function getSuggestions(line: string, history: string[]): string[] {
+export function getSuggestions(shellKey: string, line: string): string[] {
   const query = line.trim().toLowerCase()
   if (!query) return []
+  const history = loadHistory(shellKey)
 
   const seen = new Set<string>()
   const results: string[] = []

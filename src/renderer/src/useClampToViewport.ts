@@ -1,4 +1,4 @@
-import { useLayoutEffect, type RefObject } from 'react'
+import { useLayoutEffect, useState, type RefObject } from 'react'
 
 /**
  * Nudges a floating/absolutely-positioned element back inside the window
@@ -9,6 +9,19 @@ import { useLayoutEffect, type RefObject } from 'react'
  * sit.
  */
 export function useClampToViewport(ref: RefObject<HTMLElement>, active: boolean, deps: unknown[]): void {
+  // Bumped on window resize/maximize while active, to force the clamp
+  // below to re-run — otherwise a popup clamped at open time stays at that
+  // stale offset (or drifts off-screen) if the window is resized while it
+  // is still open.
+  const [resizeTick, setResizeTick] = useState(0)
+
+  useLayoutEffect(() => {
+    if (!active) return
+    const onResize = (): void => setResizeTick((n) => n + 1)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [active])
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     const el = ref.current
@@ -28,5 +41,5 @@ export function useClampToViewport(ref: RefObject<HTMLElement>, active: boolean,
 
     if (dx || dy) el.style.transform = `translate(${dx}px, ${dy}px)`
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, ...deps])
+  }, [active, resizeTick, ...deps])
 }

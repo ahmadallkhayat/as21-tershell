@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { FONT_OPTIONS, type Settings, type ThemeMode } from './settings'
+import { DEFAULT_SETTINGS, FONT_OPTIONS, type Settings, type ThemeMode } from './settings'
 import ColorPicker from './ColorPicker'
 import { CloseIcon } from './Icon'
 import { NumberInput, SegmentedControl, Select } from './ui'
@@ -113,6 +113,20 @@ export default function SettingsPanel({ settings, shells, onChange, onClose }: P
             />
           </Field>
 
+          <Field label="Scrollback">
+            <Select
+              value={String(settings.scrollback)}
+              options={[
+                { value: '1000', label: '1,000 lines' },
+                { value: '5000', label: '5,000 lines' },
+                { value: '10000', label: '10,000 lines' },
+                { value: '50000', label: '50,000 lines' }
+              ]}
+              onChange={(v) => update('scrollback', Number(v))}
+              minWidth={130}
+            />
+          </Field>
+
           <SectionLabel>Behavior</SectionLabel>
 
           <Field label="Default shell">
@@ -123,6 +137,16 @@ export default function SettingsPanel({ settings, shells, onChange, onClose }: P
               minWidth={170}
             />
           </Field>
+        </div>
+
+        <div className="flex items-center justify-end border-t border-line px-4 py-3">
+          <button
+            type="button"
+            className="rounded-md px-3 py-1.5 text-xs text-muted hover:bg-hover hover:text-fg"
+            onClick={() => onChange(DEFAULT_SETTINGS)}
+          >
+            Reset to defaults
+          </button>
         </div>
       </div>
     </div>

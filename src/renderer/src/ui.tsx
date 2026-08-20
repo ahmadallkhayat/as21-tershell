@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDownIcon, ChevronUpIcon } from './Icon'
 import { useClampToViewport } from './useClampToViewport'
@@ -19,14 +19,21 @@ interface SelectProps {
   minWidth?: number
 }
 
-/** Custom dropdown — replaces native <select> so it matches app styling and never renders an OS-drawn list. */
+/** Custom dropdown — replaces native <select> so it matches app styling and
+ * never renders an OS-drawn list. Reimplements the keyboard behavior a
+ * native <select> gives you for free (arrow keys, Home/End, type-ahead,
+ * Enter to open/close) and exposes the standard ARIA combobox/listbox
+ * roles, since swapping out the native element for free otherwise loses
+ * both. */
 export function Select({ value, options, onChange, minWidth = 150 }: SelectProps): JSX.Element {
   const [open, setOpen] = useState(false)
   const [anchor, setAnchor] = useState({ left: 0, top: 0, width: 0 })
   const buttonRef = useRef<HTMLButtonElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
+  const listboxId = useId()
 
   const selected = options.find((o) => o.value === value)
+  const selectedIndex = options.findIndex((o) => o.value === value)
 
   useLayoutEffect(() => {
     if (!open) return
@@ -54,16 +61,69 @@ export function Select({ value, options, onChange, minWidth = 150 }: SelectProps
     }
   }, [open])
 
+  const moveSelection = (delta: number): void => {
+    if (options.length === 0) return
+    const idx = selectedIndex === -1 ? 0 : selectedIndex
+    const next = options[(idx + delta + options.length) % options.length]
+    onChange(next.value)
+  }
+
+  const onButtonKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>): void => {
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        setOpen(true)
+        moveSelection(1)
+        return
+      case 'ArrowUp':
+        e.preventDefault()
+        setOpen(true)
+        moveSelection(-1)
+        return
+      case 'Home':
+        if (options.length === 0) return
+        e.preventDefault()
+        onChange(options[0].value)
+        return
+      case 'End':
+        if (options.length === 0) return
+        e.preventDefault()
+        onChange(options[options.length - 1].value)
+        return
+      case 'Enter':
+      case ' ':
+        e.preventDefault()
+        setOpen((v) => !v)
+        return
+      default:
+        // Type-ahead: jump to the next option whose label starts with the
+        // typed character, cycling from just after the current selection —
+        // the same gesture a native <select> supports.
+        if (e.key.length === 1) {
+          const key = e.key.toLowerCase()
+          const idx = selectedIndex === -1 ? -1 : selectedIndex
+          const ordered = [...options.slice(idx + 1), ...options.slice(0, idx + 1)]
+          const match = ordered.find((o) => o.label.toLowerCase().startsWith(key))
+          if (match) onChange(match.value)
+        }
+    }
+  }
+
   return (
     <>
       <button
         ref={buttonRef}
         type="button"
+        role="combobox"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listboxId}
         style={{ minWidth }}
         className={`${CONTROL_BASE} flex items-center justify-between gap-2 px-2 py-1.5 hover:border-accent-line ${
           open ? 'border-accent-line' : ''
         }`}
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={onButtonKeyDown}
       >
         <span className="flex items-center gap-2 truncate">
           {selected?.icon}
@@ -76,6 +136,8 @@ export function Select({ value, options, onChange, minWidth = 150 }: SelectProps
         createPortal(
           <div
             ref={popupRef}
+            id={listboxId}
+            role="listbox"
             className="fixed z-[60] overflow-hidden rounded-md border border-hover-strong bg-titlebar py-1 shadow-[0_16px_40px_rgba(0,0,0,0.5)]"
             style={{ left: anchor.left, top: anchor.top, minWidth: Math.max(anchor.width, minWidth) }}
           >
@@ -83,6 +145,8 @@ export function Select({ value, options, onChange, minWidth = 150 }: SelectProps
               <button
                 key={option.value}
                 type="button"
+                role="option"
+                aria-selected={option.value === value}
                 className={`flex w-full items-center gap-2 whitespace-nowrap px-2.5 py-1.5 text-left text-xs ${
                   option.value === value
                     ? 'bg-accent-soft text-bright'
@@ -113,21 +177,37 @@ interface NumberInputProps {
 
 /** Number field with custom steppers — avoids the browser's default spinner arrows. */
 export function NumberInput({ value, min, max, onChange }: NumberInputProps): JSX.Element {
+  // Tracks what's literally in the field, separate from the committed
+  // value: Number('') is 0, which then clamps straight to `min`, so
+  // clamping on every keystroke made it impossible to clear the field and
+  // retype — it kept snapping back mid-edit. Clamp only once the user
+  // actually finishes (blur/Enter).
+  const [draft, setDraft] = useState(String(value))
+
+  useEffect(() => setDraft(String(value)), [value])
+
   const clamp = (n: number): number => {
     if (min !== undefined && n < min) return min
     if (max !== undefined && n > max) return max
     return n
   }
 
+  const commit = (): void => {
+    const next = Number(draft)
+    if (draft.trim() !== '' && !Number.isNaN(next)) onChange(clamp(next))
+    else setDraft(String(value))
+  }
+
   return (
     <div className={`${CONTROL_BASE} flex items-stretch overflow-hidden focus-within:border-accent-line`}>
       <input
-        value={value}
+        value={draft}
         inputMode="numeric"
         className="w-12 bg-transparent px-2 py-1.5 text-right text-xs text-fg outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-        onChange={(e) => {
-          const next = Number(e.target.value)
-          if (!Number.isNaN(next)) onChange(clamp(next))
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit()
         }}
       />
       <div className="flex flex-col border-l border-hover-strong">
@@ -169,7 +249,7 @@ export function SegmentedControl<T extends string>({
           type="button"
           className={`px-2.5 py-1 text-[11px] transition-colors ${
             value === option.value
-              ? 'bg-accent text-white'
+              ? 'bg-accent text-accent-contrast'
               : 'bg-hover text-muted hover:bg-hover-strong hover:text-fg'
           }`}
           onClick={() => onChange(option.value)}

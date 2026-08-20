@@ -3,24 +3,22 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon, type ISearchOptions } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
-import { commitToHistory, getSuggestions, loadHistory } from './suggestions'
+import { commitToHistory, getSuggestions } from './suggestions'
 import SuggestionDropdown from './SuggestionDropdown'
 import ContextMenu from './ContextMenu'
 import SearchBar from './SearchBar'
-import { resolveThemeMode, TERMINAL_COLORS, type Settings } from './settings'
+import { resolveThemeMode, SEARCH_COLORS, TERMINAL_COLORS, type Settings } from './settings'
+import { registerPanePty } from './paneProcess'
 
-const SEARCH_OPTIONS: ISearchOptions = {
-  decorations: {
-    matchBackground: '#2a2e42',
-    matchBorder: '#7c6cff',
-    matchOverviewRuler: '#7c6cff',
-    activeMatchBackground: '#7c6cff',
-    activeMatchBorder: '#f4f5fc',
-    activeMatchColorOverviewRuler: '#f4f5fc'
-  }
+/** Search decorations hardcoded to dark-theme hex values would be near
+ * invisible in light mode, so derive them from the resolved theme mode
+ * instead of a static constant. */
+function getSearchOptions(mode: 'dark' | 'light'): ISearchOptions {
+  return { decorations: SEARCH_COLORS[mode] }
 }
 
 interface Props {
+  paneId: string
   shellKey: string
   initialCommand?: string
   visible: boolean
@@ -35,7 +33,8 @@ interface Props {
   onSelectTabIndex: (index: number) => void
   onSplitRight: () => void
   onSplitDown: () => void
-  onFocusAdjacent: (direction: 1 | -1) => void
+  onFocusAdjacent: (direction: 'left' | 'right' | 'up' | 'down') => void
+  onZoom: (delta: number | 'reset') => void
 }
 
 interface DropdownState {
@@ -88,6 +87,7 @@ function getCursorAnchor(
 }
 
 export default function TerminalView({
+  paneId,
   shellKey,
   initialCommand,
   visible,
@@ -102,7 +102,8 @@ export default function TerminalView({
   onSelectTabIndex,
   onSplitRight,
   onSplitDown,
-  onFocusAdjacent
+  onFocusAdjacent,
+  onZoom
 }: Props): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -129,12 +130,15 @@ export default function TerminalView({
   onSplitDownRef.current = onSplitDown
   const onFocusAdjacentRef = useRef(onFocusAdjacent)
   onFocusAdjacentRef.current = onFocusAdjacent
+  const onZoomRef = useRef(onZoom)
+  onZoomRef.current = onZoom
 
   const [dropdown, setDropdown] = useState<DropdownState | null>(null)
   const dropdownRef = useRef<DropdownState | null>(null)
   dropdownRef.current = dropdown
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [exitInfo, setExitInfo] = useState<{ code: number } | null>(null)
 
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -142,6 +146,7 @@ export default function TerminalView({
   const searchRef = useRef<SearchAddon | null>(null)
 
   const acceptRef = useRef<(index: number) => void>(() => {})
+  const markDesyncedRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     const container = containerRef.current
@@ -152,6 +157,7 @@ export default function TerminalView({
       cursorStyle: settings.cursorStyle,
       fontFamily: settings.fontFamily,
       fontSize: settings.fontSize,
+      scrollback: settings.scrollback,
       theme: {
         ...TERMINAL_COLORS[resolveThemeMode(settings.themeMode)],
         cursor: settings.accentColor
@@ -173,11 +179,19 @@ export default function TerminalView({
 
       if (event.altKey && !event.ctrlKey && !event.shiftKey) {
         if (event.key === 'ArrowLeft') {
-          onFocusAdjacentRef.current(-1)
+          onFocusAdjacentRef.current('left')
           return false
         }
         if (event.key === 'ArrowRight') {
-          onFocusAdjacentRef.current(1)
+          onFocusAdjacentRef.current('right')
+          return false
+        }
+        if (event.key === 'ArrowUp') {
+          onFocusAdjacentRef.current('up')
+          return false
+        }
+        if (event.key === 'ArrowDown') {
+          onFocusAdjacentRef.current('down')
           return false
         }
         return true
@@ -189,6 +203,24 @@ export default function TerminalView({
       if (key === 'tab') {
         if (event.shiftKey) onPrevTabRef.current()
         else onNextTabRef.current()
+        return false
+      }
+
+      // Font-size zoom (Ctrl+=/Ctrl+-/Ctrl+0) is checked before the
+      // shift-only gate below since it's the standard shortcut everywhere
+      // else (browsers, VS Code, Windows Terminal) and isn't bound to
+      // anything shell-side, unlike bare Ctrl+C/Ctrl+V which this app
+      // deliberately leaves alone in favor of the Ctrl+Shift+ variants.
+      if (key === '=' || key === '+') {
+        onZoomRef.current(1)
+        return false
+      }
+      if (key === '-') {
+        onZoomRef.current(-1)
+        return false
+      }
+      if (key === '0') {
+        onZoomRef.current('reset')
         return false
       }
 
@@ -205,6 +237,9 @@ export default function TerminalView({
           navigator.clipboard.readText().then((text) => {
             if (text && ptyIdRef.current) window.api.write(ptyIdRef.current, text)
           })
+          // Pasted text never flows through onData's lineBuffer tracking,
+          // so treat it the same as any other edit we can't see the shape of.
+          markDesyncedRef.current()
           return false
         case 't':
           onNewTabRef.current()
@@ -242,15 +277,34 @@ export default function TerminalView({
     })
 
     let disposed = false
+    let exited = false
     let lineBuffer = ''
-    let history = loadHistory()
+    setExitInfo(null)
+
+    // Whether lineBuffer can actually be trusted to match the shell's real
+    // input line. We only ever append/trim it ourselves for plain typing,
+    // Enter, Backspace and Ctrl+C — ANY other line-editing gesture (arrow
+    // keys, Home/End, Ctrl+U/W/K, shell history recall, shell-side tab
+    // completion, a paste) can rewrite the shell's line in ways we have no
+    // visibility into. Rather than guess at PSReadLine/cmd keybindings and
+    // risk being wrong, we just stop trusting lineBuffer the moment any of
+    // those happen, and stay untrusted until Enter/Ctrl+C gives us a known
+    // (empty) baseline again. This is what makes acceptSuggestion's
+    // backspace-count safe: it refuses to run at all while untrusted.
+    let trusted = true
 
     const closeDropdown = (): void => setDropdown(null)
     let suggestionsPending = false
 
+    const inAltScreen = (): boolean => term.buffer.active.type === 'alternate'
+
     const syncDropdown = (): void => {
       suggestionsPending = false
-      const items = getSuggestions(lineBuffer, history)
+      if (!trusted || inAltScreen()) {
+        closeDropdown()
+        return
+      }
+      const items = getSuggestions(shellKey, lineBuffer)
       if (items.length === 0) {
         closeDropdown()
         return
@@ -268,7 +322,14 @@ export default function TerminalView({
       suggestionsPending = true
     }
 
+    const markDesynced = (): void => {
+      trusted = false
+      closeDropdown()
+    }
+    markDesyncedRef.current = markDesynced
+
     const acceptSuggestion = (index: number): void => {
+      if (!trusted) return
       const items = dropdownRef.current?.items
       const chosen = items?.[index]
       if (!chosen || !ptyIdRef.current) return
@@ -279,16 +340,21 @@ export default function TerminalView({
     }
     acceptRef.current = acceptSuggestion
 
-    window.api.createSession(shellKey, term.cols, term.rows).then((id) => {
-      if (disposed) {
-        window.api.dispose(id)
-        return
-      }
-      ptyIdRef.current = id
-      if (initialCommand) {
-        window.api.write(id, `${initialCommand}\r`)
-      }
-    })
+    window.api
+      .createSession(shellKey, term.cols, term.rows, initialCommand)
+      .then((id) => {
+        if (disposed) {
+          window.api.dispose(id)
+          return
+        }
+        ptyIdRef.current = id
+        registerPanePty(paneId, id)
+      })
+      .catch((err: unknown) => {
+        if (disposed) return
+        const message = err instanceof Error ? err.message : String(err)
+        term.writeln(`\r\n\x1b[31mFailed to start shell: ${message}\x1b[0m`)
+      })
 
     const offData = window.api.onData((id, data) => {
       if (id !== ptyIdRef.current) return
@@ -296,20 +362,36 @@ export default function TerminalView({
         if (suggestionsPending) syncDropdown()
       })
     })
-    const offExit = window.api.onExit((id) => {
-      if (id === ptyIdRef.current) onExitRef.current()
+    const offExit = window.api.onExit((id, exitCode) => {
+      if (id !== ptyIdRef.current) return
+      // Don't remove the pane the instant its process dies — that takes
+      // any error output with it before it can be read. Show what
+      // happened and wait for the user to actually dismiss it.
+      exited = true
+      closeDropdown()
+      setExitInfo({ code: exitCode })
+    })
+
+    // Belt-and-suspenders: close the dropdown the instant a full-screen app
+    // (vim, htop, less, an agent CLI) takes over via the alternate screen
+    // buffer, rather than only on the next keystroke.
+    const onBufferChange = term.buffer.onBufferChange(() => {
+      if (inAltScreen()) closeDropdown()
     })
 
     const onInput = term.onData((data) => {
-      if (!ptyIdRef.current) return
+      if (!ptyIdRef.current || exited) return
       const current = dropdownRef.current
 
-      if (current) {
-        if (data === '\x1b[A') {
+      if (current && !inAltScreen()) {
+        // Ctrl+Up/Down navigate the dropdown; plain Up/Down are left alone
+        // so shell history recall is never stolen just because a
+        // suggestion happens to be showing.
+        if (data === '\x1b[1;5A') {
           setDropdown({ ...current, selected: (current.selected - 1 + current.items.length) % current.items.length })
           return
         }
-        if (data === '\x1b[B') {
+        if (data === '\x1b[1;5B') {
           setDropdown({ ...current, selected: (current.selected + 1) % current.items.length })
           return
         }
@@ -326,25 +408,33 @@ export default function TerminalView({
       window.api.write(ptyIdRef.current, data)
 
       if (data === '\r' || data === '\n') {
-        history = commitToHistory(history, lineBuffer)
+        if (trusted) commitToHistory(shellKey, lineBuffer)
         lineBuffer = ''
+        trusted = true
         closeDropdown()
-        return
-      }
-      if (data === '\x7f' || data === '\b') {
-        lineBuffer = lineBuffer.slice(0, -1)
-        requestSync()
         return
       }
       if (data === '\x03') {
         lineBuffer = ''
+        trusted = true
         closeDropdown()
         return
       }
-      if (data === '\t' || data.startsWith('\x1b')) {
-        closeDropdown()
+      if (data === '\x7f' || data === '\b') {
+        if (trusted) {
+          lineBuffer = lineBuffer.slice(0, -1)
+          requestSync()
+        }
         return
       }
+      // Anything else we can't confidently model as plain text: arrows,
+      // Home/End, Ctrl+U/W/K, shell-side tab completion, escape sequences
+      // in general (including pasted bracketed-paste content).
+      if (data === '\t' || data === '\x15' || data === '\x17' || data === '\x0b' || data.startsWith('\x1b')) {
+        markDesynced()
+        return
+      }
+      if (!trusted) return
       lineBuffer += data
       requestSync()
     })
@@ -361,12 +451,14 @@ export default function TerminalView({
       onInput.dispose()
       onTitle.dispose()
       onSearchResults.dispose()
+      onBufferChange.dispose()
       offData()
       offExit()
+      registerPanePty(paneId, null)
       if (ptyIdRef.current) window.api.dispose(ptyIdRef.current)
       term.dispose()
     }
-  }, [shellKey])
+  }, [shellKey, paneId])
 
   useEffect(() => {
     const term = termRef.current
@@ -378,13 +470,25 @@ export default function TerminalView({
     term.options.fontFamily = settings.fontFamily
     term.options.fontSize = settings.fontSize
     term.options.cursorStyle = settings.cursorStyle
+    term.options.scrollback = settings.scrollback
     term.options.theme = {
       ...TERMINAL_COLORS[resolveThemeMode(settings.themeMode)],
       cursor: settings.accentColor
     }
     fitRef.current?.fit()
     if (ptyIdRef.current) window.api.resize(ptyIdRef.current, term.cols, term.rows)
-  }, [settings])
+    // Only the fields actually read above belong in the dependency array —
+    // settings.defaultShell (or any other future field) changing shouldn't
+    // re-fit and re-resize every open terminal for no visible reason.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    settings.fontFamily,
+    settings.fontSize,
+    settings.cursorStyle,
+    settings.themeMode,
+    settings.accentColor,
+    settings.scrollback
+  ])
 
   useEffect(() => {
     if (settings.themeMode !== 'system') return
@@ -426,6 +530,20 @@ export default function TerminalView({
     }
   }, [contextMenu])
 
+  // Only dismiss the "process exited" overlay from user input while this
+  // pane is actually the one on screen — a background tab whose shell died
+  // shouldn't vanish just because the user is typing somewhere else.
+  useEffect(() => {
+    if (!exitInfo || !visible) return
+    const close = (): void => onExitRef.current()
+    window.addEventListener('keydown', close)
+    window.addEventListener('mousedown', close)
+    return () => {
+      window.removeEventListener('keydown', close)
+      window.removeEventListener('mousedown', close)
+    }
+  }, [exitInfo, visible])
+
   const handleCopy = (): void => {
     const term = termRef.current
     const selection = term?.getSelection()
@@ -437,6 +555,7 @@ export default function TerminalView({
     navigator.clipboard.readText().then((text) => {
       if (text && ptyIdRef.current) window.api.write(ptyIdRef.current, text)
     })
+    markDesyncedRef.current()
     setContextMenu(null)
   }
 
@@ -447,7 +566,11 @@ export default function TerminalView({
       setMatchInfo({ index: -1, count: 0 })
       return
     }
-    searchRef.current?.findNext(searchQuery, { ...SEARCH_OPTIONS, incremental: true })
+    searchRef.current?.findNext(searchQuery, {
+      ...getSearchOptions(resolveThemeMode(settings.themeMode)),
+      incremental: true
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery, searchOpen])
 
   const closeSearch = (): void => {
@@ -511,10 +634,31 @@ export default function TerminalView({
           matchIndex={matchInfo.index}
           matchCount={matchInfo.count}
           onQueryChange={setSearchQuery}
-          onNext={() => searchQuery && searchRef.current?.findNext(searchQuery, SEARCH_OPTIONS)}
-          onPrev={() => searchQuery && searchRef.current?.findPrevious(searchQuery, SEARCH_OPTIONS)}
+          onNext={() =>
+            searchQuery &&
+            searchRef.current?.findNext(searchQuery, getSearchOptions(resolveThemeMode(settings.themeMode)))
+          }
+          onPrev={() =>
+            searchQuery &&
+            searchRef.current?.findPrevious(searchQuery, getSearchOptions(resolveThemeMode(settings.themeMode)))
+          }
           onClose={closeSearch}
         />
+      )}
+      {exitInfo && (
+        <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-between gap-3 border-t border-hover-strong bg-hover/95 px-3 py-2 text-xs text-fg">
+          <span>
+            Process exited
+            {exitInfo.code !== 0 && <span className="text-danger"> (code {exitInfo.code})</span>}
+          </span>
+          <button
+            type="button"
+            className="rounded px-2 py-1 text-[11px] text-muted hover:bg-hover-strong hover:text-fg"
+            onClick={() => onExitRef.current()}
+          >
+            Close (any key)
+          </button>
+        </div>
       )}
     </div>
   )

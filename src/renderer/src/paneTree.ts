@@ -80,30 +80,53 @@ export function removeLeaf(node: PaneNode, id: string): PaneNode | null {
   if (node.type === 'leaf') {
     return node.id === id ? null : node
   }
-  const children = node.children
-    .map((c) => removeLeaf(c, id))
-    .filter((c): c is PaneNode => c !== null)
+
+  const survivedIdx: number[] = []
+  const children: PaneNode[] = []
+  node.children.forEach((c, i) => {
+    const result = removeLeaf(c, id)
+    if (result !== null) {
+      children.push(result)
+      survivedIdx.push(i)
+    }
+  })
 
   if (children.length === node.children.length) {
-    // id wasn't in this subtree at all — recurse normally happened above,
-    // nothing changed, return as-is.
-    return { ...node, children }
+    // id wasn't in this subtree — a descendant may still have changed
+    // identity from its own removal, but if none did, keep this node's own
+    // identity too rather than spreading a new object that only re-renders
+    // everything for no reason.
+    const unchanged = children.every((c, i) => c === node.children[i])
+    return unchanged ? node : { ...node, children }
   }
   if (children.length === 0) return null
   if (children.length === 1) return children[0]
 
-  // Redistribute sizes evenly among the remaining children after a removal.
-  const even = 100 / children.length
-  return { ...node, children, sizes: children.map(() => even) }
+  // Redistribute only the removed leaf's freed size, scaling the
+  // survivors' existing sizes up to fill it — sizes the user manually set
+  // on panes that weren't touched by this removal are preserved relative
+  // to each other, instead of every remaining pane snapping to even.
+  const survivedSizes = survivedIdx.map((i) => node.sizes[i])
+  const survivedTotal = survivedSizes.reduce((a, b) => a + b, 0)
+  const sizes =
+    survivedTotal > 0
+      ? survivedSizes.map((s) => (s / survivedTotal) * 100)
+      : children.map(() => 100 / children.length)
+
+  return { ...node, children, sizes }
 }
 
 export function updateSplitSizes(node: PaneNode, splitId: string, sizes: number[]): PaneNode {
   if (node.type === 'leaf') return node
   if (node.id === splitId) return { ...node, sizes }
-  return { ...node, children: node.children.map((c) => updateSplitSizes(c, splitId, sizes)) }
+  const children = node.children.map((c) => updateSplitSizes(c, splitId, sizes))
+  const unchanged = children.every((c, i) => c === node.children[i])
+  return unchanged ? node : { ...node, children }
 }
 
 export function renameLeaf(node: PaneNode, id: string, title: string): PaneNode {
   if (node.type === 'leaf') return node.id === id ? { ...node, title } : node
-  return { ...node, children: node.children.map((c) => renameLeaf(c, id, title)) }
+  const children = node.children.map((c) => renameLeaf(c, id, title))
+  const unchanged = children.every((c, i) => c === node.children[i])
+  return unchanged ? node : { ...node, children }
 }

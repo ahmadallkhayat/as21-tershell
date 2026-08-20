@@ -10,8 +10,12 @@ const api = {
 
   listCommands: (force?: boolean): Promise<string[]> => ipcRenderer.invoke('shell:commands', force),
 
-  createSession: (shellKey: string, cols: number, rows: number): Promise<string> =>
-    ipcRenderer.invoke('pty:create', { shell: shellKey, cols, rows }),
+  createSession: (
+    shellKey: string,
+    cols: number,
+    rows: number,
+    initialCommand?: string
+  ): Promise<string> => ipcRenderer.invoke('pty:create', { shell: shellKey, cols, rows, initialCommand }),
 
   write: (id: string, data: string): void => {
     ipcRenderer.send('pty:write', { id, data })
@@ -24,6 +28,9 @@ const api = {
   dispose: (id: string): void => {
     ipcRenderer.send('pty:dispose', { id })
   },
+
+  getActiveProcess: (id: string): Promise<string | null> =>
+    ipcRenderer.invoke('pty:activeProcess', { id }),
 
   onData: (cb: (id: string, data: string) => void): (() => void) => {
     const listener = (_e: unknown, args: { id: string; data: string }): void =>

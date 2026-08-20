@@ -1,8 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import TitleBar from './TitleBar'
 import PaneView, { type PaneActions } from './PaneView'
+import TerminalHost from './TerminalHost'
 import SettingsPanel from './SettingsPanel'
-import { applyAccentColor, applyThemeMode, loadSettings, saveSettings, type Settings } from './settings'
+import ConfirmCloseDialog from './ConfirmCloseDialog'
+import { busyProcessName } from './paneProcess'
+import { slotStore } from './paneSlots'
+import {
+  applyAccentColor,
+  applyThemeMode,
+  DEFAULT_SETTINGS,
+  loadSettings,
+  saveSettings,
+  type Settings
+} from './settings'
 import {
   type PaneNode,
   createLeaf,
@@ -29,6 +40,9 @@ export default function App(): JSX.Element {
   const [activeId, setActiveId] = useState<string>('')
   const [settings, setSettings] = useState<Settings>(() => loadSettings())
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [confirmClose, setConfirmClose] = useState<{ processNames: string[]; onConfirm: () => void } | null>(
+    null
+  )
 
   useEffect(() => {
     applyAccentColor(settings.accentColor)
@@ -41,6 +55,19 @@ export default function App(): JSX.Element {
   const updateSettings = useCallback((next: Settings) => {
     setSettings(next)
     saveSettings(next)
+  }, [])
+
+  // Ctrl+=/Ctrl+-/Ctrl+0, the zoom shortcuts every terminal/browser/editor
+  // supports, but which this app only ever exposed through the settings
+  // dialog's font-size field.
+  const zoomFont = useCallback((delta: number | 'reset') => {
+    setSettings((prev) => {
+      const fontSize =
+        delta === 'reset' ? DEFAULT_SETTINGS.fontSize : Math.max(8, Math.min(32, prev.fontSize + delta))
+      const next = { ...prev, fontSize }
+      saveSettings(next)
+      return next
+    })
   }, [])
 
   const addTab = useCallback(
@@ -70,6 +97,18 @@ export default function App(): JSX.Element {
       prev.map((t) => (t.id === tabId ? { ...t, root: renameLeaf(t.root, paneId, title) } : t))
     )
   }, [])
+
+  /** Manual rename from double-clicking a tab, as opposed to renamePane's
+   * other caller — the shell's own OSC title escape sequence — which
+   * always targets a specific pane it already knows. This one only has a
+   * tab id to go on, so it resolves that tab's currently-focused pane. */
+  const renameTab = useCallback(
+    (tabId: string, title: string) => {
+      const tab = tabs.find((t) => t.id === tabId)
+      if (tab) renamePane(tabId, tab.focusedPaneId, title)
+    },
+    [tabs, renamePane]
+  )
 
   const closeTab = useCallback((id: string) => {
     setTabs((prev) => {
@@ -106,6 +145,34 @@ export default function App(): JSX.Element {
     [tabs, closeTab]
   )
 
+  /** Gate a destructive close behind a confirmation if any of the affected
+   * panes still has a live foreground process (see paneProcess.ts) —
+   * otherwise proceed immediately. */
+  const requestClose = useCallback((paneIds: string[], perform: () => void) => {
+    Promise.all(paneIds.map(busyProcessName)).then((names) => {
+      const busy = names.filter((n): n is string => !!n)
+      if (busy.length === 0) {
+        perform()
+        return
+      }
+      setConfirmClose({ processNames: busy, onConfirm: () => { setConfirmClose(null); perform() } })
+    })
+  }, [])
+
+  const requestClosePane = useCallback(
+    (tabId: string, paneId: string) => requestClose([paneId], () => closePane(tabId, paneId)),
+    [requestClose, closePane]
+  )
+
+  const requestCloseTab = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId)
+      if (!tab) return
+      requestClose(collectLeaves(tab.root).map((l) => l.id), () => closeTab(tabId))
+    },
+    [tabs, requestClose, closeTab]
+  )
+
   const splitPane = useCallback(
     (tabId: string, paneId: string, direction: 'row' | 'column') => {
       const tab = tabs.find((t) => t.id === tabId)
@@ -133,15 +200,63 @@ export default function App(): JSX.Element {
     setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, focusedPaneId: paneId } : t)))
   }, [])
 
+  /** True spatial pane navigation: reads each leaf's actual on-screen rect
+   * (available now that terminals are portaled into stable slot divs — see
+   * paneSlots.ts) and picks the nearest pane whose center lies in the
+   * requested direction, rather than cycling flat tree order (which, in
+   * anything but a single row/column of panes, routinely "moves left" into
+   * a pane that isn't spatially adjacent at all). */
   const focusAdjacentPane = useCallback(
-    (tabId: string, direction: 1 | -1) => {
+    (tabId: string, direction: 'left' | 'right' | 'up' | 'down') => {
       const tab = tabs.find((t) => t.id === tabId)
       if (!tab) return
       const leaves = collectLeaves(tab.root)
       if (leaves.length <= 1) return
-      const idx = leaves.findIndex((l) => l.id === tab.focusedPaneId)
-      const next = leaves[(idx + direction + leaves.length) % leaves.length]
-      if (next) focusPane(tabId, next.id)
+      const currentEl = slotStore.get(tab.focusedPaneId)
+      if (!currentEl) return
+      const currentRect = currentEl.getBoundingClientRect()
+      const cx = currentRect.left + currentRect.width / 2
+      const cy = currentRect.top + currentRect.height / 2
+
+      let bestId: string | null = null
+      let bestScore = Infinity
+      for (const leaf of leaves) {
+        if (leaf.id === tab.focusedPaneId) continue
+        const el = slotStore.get(leaf.id)
+        if (!el) continue
+        const rect = el.getBoundingClientRect()
+        const dx = rect.left + rect.width / 2 - cx
+        const dy = rect.top + rect.height / 2 - cy
+
+        let primary: number
+        let perpendicular: number
+        if (direction === 'left') {
+          if (dx >= -1) continue
+          primary = -dx
+          perpendicular = Math.abs(dy)
+        } else if (direction === 'right') {
+          if (dx <= 1) continue
+          primary = dx
+          perpendicular = Math.abs(dy)
+        } else if (direction === 'up') {
+          if (dy >= -1) continue
+          primary = -dy
+          perpendicular = Math.abs(dx)
+        } else {
+          if (dy <= 1) continue
+          primary = dy
+          perpendicular = Math.abs(dx)
+        }
+
+        // Favor panes aligned with the current one over merely-closer ones
+        // that are off to the side.
+        const score = primary + perpendicular * 2
+        if (score < bestScore) {
+          bestScore = score
+          bestId = leaf.id
+        }
+      }
+      if (bestId) focusPane(tabId, bestId)
     },
     [tabs, focusPane]
   )
@@ -184,6 +299,22 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [tabs.length, newTab])
 
+  const makeActions = (tabId: string): PaneActions => ({
+    onExit: (paneId) => closePane(tabId, paneId),
+    onTitleChange: (paneId, title) => renamePane(tabId, paneId, title),
+    onFocus: (paneId) => focusPane(tabId, paneId),
+    onSplitRight: (paneId) => splitPane(tabId, paneId, 'row'),
+    onSplitDown: (paneId) => splitPane(tabId, paneId, 'column'),
+    onClosePane: (paneId) => requestClosePane(tabId, paneId),
+    onResizeSplit: (splitId, sizes) => resizeSplit(tabId, splitId, sizes),
+    onFocusAdjacent: (direction) => focusAdjacentPane(tabId, direction),
+    onNewTab: newTab,
+    onNextTab: selectNextTab,
+    onPrevTab: selectPrevTab,
+    onSelectTabIndex: selectTabByIndex,
+    onZoom: zoomFont
+  })
+
   const titleBarTabs = tabs.map((tab) => {
     const focused = findLeaf(tab.root, tab.focusedPaneId)
     return {
@@ -201,36 +332,18 @@ export default function App(): JSX.Element {
         activeId={activeId}
         shells={shells}
         onSelect={setActiveId}
-        onClose={closeTab}
+        onClose={requestCloseTab}
         onAdd={addTab}
+        onRename={renameTab}
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <div className="relative min-h-0 flex-1">
         {tabs.map((tab) => {
-          const actions: PaneActions = {
-            onExit: (paneId) => closePane(tab.id, paneId),
-            onTitleChange: (paneId, title) => renamePane(tab.id, paneId, title),
-            onFocus: (paneId) => focusPane(tab.id, paneId),
-            onSplitRight: (paneId) => splitPane(tab.id, paneId, 'row'),
-            onSplitDown: (paneId) => splitPane(tab.id, paneId, 'column'),
-            onClosePane: (paneId) => closePane(tab.id, paneId),
-            onResizeSplit: (splitId, sizes) => resizeSplit(tab.id, splitId, sizes),
-            onFocusAdjacent: (direction) => focusAdjacentPane(tab.id, direction),
-            onNewTab: newTab,
-            onNextTab: selectNextTab,
-            onPrevTab: selectPrevTab,
-            onSelectTabIndex: selectTabByIndex
-          }
+          const actions = makeActions(tab.id)
           const active = tab.id === activeId
           return (
             <div key={tab.id} className="absolute inset-0" style={{ display: active ? 'flex' : 'none' }}>
-              <PaneView
-                node={tab.root}
-                tabActive={active}
-                focusedPaneId={tab.focusedPaneId}
-                actions={actions}
-                settings={settings}
-              />
+              <PaneView node={tab.root} tabActive={active} focusedPaneId={tab.focusedPaneId} actions={actions} />
             </div>
           )
         })}
@@ -239,6 +352,20 @@ export default function App(): JSX.Element {
             No terminal sessions. Click + to start one.
           </div>
         )}
+        {tabs.flatMap((tab) => {
+          const actions = makeActions(tab.id)
+          const active = tab.id === activeId
+          return collectLeaves(tab.root).map((leaf) => (
+            <TerminalHost
+              key={leaf.id}
+              leaf={leaf}
+              tabActive={active}
+              focused={active && leaf.id === tab.focusedPaneId}
+              settings={settings}
+              actions={actions}
+            />
+          ))
+        })}
       </div>
       {settingsOpen && (
         <SettingsPanel
@@ -246,6 +373,13 @@ export default function App(): JSX.Element {
           shells={shells}
           onChange={updateSettings}
           onClose={() => setSettingsOpen(false)}
+        />
+      )}
+      {confirmClose && (
+        <ConfirmCloseDialog
+          processNames={confirmClose.processNames}
+          onConfirm={confirmClose.onConfirm}
+          onCancel={() => setConfirmClose(null)}
         />
       )}
     </div>

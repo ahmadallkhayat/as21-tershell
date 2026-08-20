@@ -28,11 +28,13 @@ export default function ContextMenu({
   return (
     <div
       ref={ref}
+      role="menu"
       className="absolute z-30 min-w-[160px] overflow-hidden rounded-md border border-hover-strong bg-hover shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
       style={{ left: x, top: y }}
     >
       <button
         type="button"
+        role="menuitem"
         disabled={!canCopy}
         className="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-hover-strong disabled:cursor-default disabled:text-muted disabled:hover:bg-transparent"
         onMouseDown={(e) => {
@@ -45,6 +47,7 @@ export default function ContextMenu({
       </button>
       <button
         type="button"
+        role="menuitem"
         className="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-hover-strong"
         onMouseDown={(e) => {
           e.preventDefault()
@@ -57,6 +60,7 @@ export default function ContextMenu({
       <div className="border-t border-line" />
       <button
         type="button"
+        role="menuitem"
         className="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-hover-strong"
         onMouseDown={(e) => {
           e.preventDefault()
@@ -68,6 +72,7 @@ export default function ContextMenu({
       </button>
       <button
         type="button"
+        role="menuitem"
         className="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-hover-strong"
         onMouseDown={(e) => {
           e.preventDefault()
@@ -80,6 +85,7 @@ export default function ContextMenu({
       <div className="border-t border-line" />
       <button
         type="button"
+        role="menuitem"
         className="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-hover-strong"
         onMouseDown={(e) => {
           e.preventDefault()

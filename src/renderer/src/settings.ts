@@ -7,6 +7,7 @@ export interface Settings {
   accentColor: string
   defaultShell: string
   themeMode: ThemeMode
+  scrollback: number
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -15,7 +16,11 @@ export const DEFAULT_SETTINGS: Settings = {
   cursorStyle: 'block',
   accentColor: '#7c6cff',
   defaultShell: 'powershell',
-  themeMode: 'system'
+  themeMode: 'system',
+  // xterm.js's own default (1000 lines) is small enough that a chatty
+  // build or an AI agent's output silently truncates the top of what it
+  // printed within a screenful of activity.
+  scrollback: 5000
 }
 
 export const FONT_OPTIONS = [
@@ -57,6 +62,7 @@ export function saveSettings(settings: Settings): void {
 
 export function applyAccentColor(color: string): void {
   document.documentElement.style.setProperty('--user-accent', color)
+  document.documentElement.style.setProperty('--accent-contrast', contrastTextColor(color))
 }
 
 export function applyThemeMode(mode: ThemeMode): void {
@@ -74,7 +80,89 @@ export function resolveThemeMode(mode: ThemeMode): 'dark' | 'light' {
   return mode
 }
 
+// Full 16-color ANSI palette per mode. Without this, only background/
+// foreground were themed and the 16 ANSI colors fell back to xterm's
+// defaults — which are tuned for a dark background, so in light mode
+// bright program output (yellow/cyan/green especially) becomes hard or
+// impossible to read.
 export const TERMINAL_COLORS = {
-  dark: { background: '#0b0d14', foreground: '#d8dae8' },
-  light: { background: '#f7f7fb', foreground: '#23253a' }
+  dark: {
+    background: '#0b0d14',
+    foreground: '#d8dae8',
+    black: '#1a1d2b',
+    red: '#ff5d5d',
+    green: '#4ade80',
+    yellow: '#facc15',
+    blue: '#5b9dff',
+    magenta: '#c084fc',
+    cyan: '#34e2e2',
+    white: '#d8dae8',
+    brightBlack: '#6b7086',
+    brightRed: '#ff8080',
+    brightGreen: '#86efac',
+    brightYellow: '#fde047',
+    brightBlue: '#93c5fd',
+    brightMagenta: '#e0aaff',
+    brightCyan: '#67e8f9',
+    brightWhite: '#f4f5fc'
+  },
+  light: {
+    background: '#f7f7fb',
+    foreground: '#23253a',
+    black: '#23253a',
+    red: '#dc2626',
+    green: '#15803d',
+    yellow: '#a16207',
+    blue: '#2563eb',
+    magenta: '#9333ea',
+    cyan: '#0e7c8c',
+    white: '#6b7086',
+    brightBlack: '#4b5065',
+    brightRed: '#ef4444',
+    brightGreen: '#16a34a',
+    brightYellow: '#ca8a04',
+    brightBlue: '#3b82f6',
+    brightMagenta: '#a855f7',
+    brightCyan: '#0891b2',
+    brightWhite: '#0a0b14'
+  }
+}
+
+// Search-match highlight colors, themed the same way — the addon's
+// decorations previously stayed hardcoded to dark-theme hex values
+// regardless of mode, making them near-invisible in light mode.
+export const SEARCH_COLORS = {
+  dark: {
+    matchBackground: '#2a2e42',
+    matchBorder: '#7c6cff',
+    matchOverviewRuler: '#7c6cff',
+    activeMatchBackground: '#7c6cff',
+    activeMatchBorder: '#f4f5fc',
+    activeMatchColorOverviewRuler: '#f4f5fc'
+  },
+  light: {
+    matchBackground: '#dcdee8',
+    matchBorder: '#7c6cff',
+    matchOverviewRuler: '#7c6cff',
+    activeMatchBackground: '#7c6cff',
+    activeMatchBorder: '#0a0b14',
+    activeMatchColorOverviewRuler: '#0a0b14'
+  }
+}
+
+/** Perceived-luminance-based black/white pick for legible text on top of an
+ * arbitrary accent color — used instead of a hardcoded text-white, which
+ * becomes illegible the moment the user picks a light accent. */
+export function contrastTextColor(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return '#ffffff'
+  const toLinear = (c: number): number => {
+    const s = c / 255
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
+  }
+  const r = toLinear(parseInt(m[1].slice(0, 2), 16))
+  const g = toLinear(parseInt(m[1].slice(2, 4), 16))
+  const b = toLinear(parseInt(m[1].slice(4, 6), 16))
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+  return luminance > 0.4 ? '#0a0b14' : '#ffffff'
 }

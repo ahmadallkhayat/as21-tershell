@@ -63,6 +63,7 @@ export default function SuggestionDropdown({
   return (
     <div
       ref={ref}
+      role="listbox"
       className="absolute z-20 max-w-[min(420px,calc(100%-16px))] min-w-[220px] overflow-hidden rounded-md border border-hover-strong bg-hover py-1 shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
       style={{
         left: placement?.left ?? x,
@@ -73,6 +74,8 @@ export default function SuggestionDropdown({
       {items.map((item, i) => (
         <div
           key={item}
+          role="option"
+          aria-selected={i === selectedIndex}
           className={`cursor-pointer truncate border-l-2 px-3 py-1.5 font-mono text-xs ${
             i === selectedIndex
               ? 'border-accent bg-accent-soft text-bright'

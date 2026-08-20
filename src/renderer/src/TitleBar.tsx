@@ -44,6 +44,7 @@ interface Props {
   onSelect: (id: string) => void
   onClose: (id: string) => void
   onAdd: (shellKey: string, initialCommand?: string, title?: string, logoId?: string) => void
+  onRename: (id: string, title: string) => void
   onOpenSettings: () => void
 }
 
@@ -86,16 +87,37 @@ export default function TitleBar({
   onSelect,
   onClose,
   onAdd,
+  onRename,
   onOpenSettings
 }: Props): JSX.Element {
   const [maximized, setMaximized] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [installedCommands, setInstalledCommands] = useState<string[] | null>(null)
+  const [editingTabId, setEditingTabId] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
   const tabsRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const menuPopupRef = useRef<HTMLDivElement>(null)
+  const editInputRef = useRef<HTMLInputElement>(null)
 
   useDragScroll(tabsRef)
+
+  useEffect(() => {
+    if (editingTabId) editInputRef.current?.select()
+  }, [editingTabId])
+
+  const startRename = (tab: Tab): void => {
+    setEditingTabId(tab.id)
+    setEditValue(tab.title)
+  }
+
+  const commitRename = (): void => {
+    if (editingTabId) {
+      const trimmed = editValue.trim()
+      if (trimmed) onRename(editingTabId, trimmed)
+    }
+    setEditingTabId(null)
+  }
 
   useClampToViewport(menuPopupRef, menuOpen, [installedCommands])
 
@@ -103,6 +125,23 @@ export default function TitleBar({
 
   useEffect(() => {
     window.api.listCommands().then(setInstalledCommands)
+  }, [])
+
+  // The installed-command cache is fetched once at launch, so it never
+  // notices a tool the user just installed. Re-check (bypassing the main
+  // process's cache) whenever the menu is about to be looked at, and when
+  // the window regains focus after time spent in an install tab elsewhere.
+  useEffect(() => {
+    if (!menuOpen) return
+    window.api.listCommands(true).then(setInstalledCommands)
+  }, [menuOpen])
+
+  useEffect(() => {
+    const onFocus = (): void => {
+      window.api.listCommands(true).then(setInstalledCommands)
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
   }, [])
 
   useEffect(() => {
@@ -138,11 +177,27 @@ export default function TitleBar({
                   : 'border-transparent text-muted hover:bg-hover/60 hover:text-fg'
               }`}
               onClick={() => onSelect(tab.id)}
+              onDoubleClick={() => startRename(tab)}
             >
               <TabIcon logoId={tab.logoId} shellKey={tab.shellKey} />
-              <span className="max-w-[160px] truncate" title={tab.title}>
-                {tab.title}
-              </span>
+              {editingTabId === tab.id ? (
+                <input
+                  ref={editInputRef}
+                  value={editValue}
+                  className="w-[120px] max-w-[160px] bg-transparent text-xs text-bright outline-none"
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename()
+                    else if (e.key === 'Escape') setEditingTabId(null)
+                  }}
+                />
+              ) : (
+                <span className="max-w-[160px] truncate" title={tab.title}>
+                  {tab.title}
+                </span>
+              )}
               <button
                 className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded hover:bg-hover-strong"
                 title="Close tab"
@@ -159,6 +214,8 @@ export default function TitleBar({
         <div className="relative shrink-0 [-webkit-app-region:no-drag]" ref={menuRef}>
           <button
             type="button"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
             className="flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-accent-soft hover:text-accent"
             title="New tab"
             onClick={() => setMenuOpen((v) => !v)}
@@ -168,12 +225,14 @@ export default function TitleBar({
           {menuOpen && (
             <div
               ref={menuPopupRef}
+              role="menu"
               className="absolute left-0 top-full z-10 mt-1 w-max overflow-hidden rounded-md border border-hover-strong bg-hover shadow-lg"
             >
               {shellOptions.map((s) => (
                 <button
                   key={s.key}
                   type="button"
+                  role="menuitem"
                   className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
                   onClick={() => {
                     onAdd(s.key)
@@ -196,6 +255,7 @@ export default function TitleBar({
                   <button
                     key={tool.id}
                     type="button"
+                    role="menuitem"
                     className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
                     onClick={() => {
                       if (installed) {

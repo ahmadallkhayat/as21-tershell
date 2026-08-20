@@ -1,7 +1,6 @@
 import { Fragment, useRef } from 'react'
 import type { PaneNode } from './paneTree'
-import type { Settings } from './settings'
-import TerminalView from './TerminalView'
+import { slotStore } from './paneSlots'
 
 export interface PaneActions {
   onExit: (paneId: string) => void
@@ -11,11 +10,12 @@ export interface PaneActions {
   onSplitDown: (paneId: string) => void
   onClosePane: (paneId: string) => void
   onResizeSplit: (splitId: string, sizes: number[]) => void
-  onFocusAdjacent: (direction: 1 | -1) => void
+  onFocusAdjacent: (direction: 'left' | 'right' | 'up' | 'down') => void
   onNewTab: () => void
   onNextTab: () => void
   onPrevTab: () => void
   onSelectTabIndex: (index: number) => void
+  onZoom: (delta: number | 'reset') => void
 }
 
 interface Props {
@@ -23,7 +23,6 @@ interface Props {
   tabActive: boolean
   focusedPaneId: string
   actions: PaneActions
-  settings: Settings
 }
 
 function Divider({
@@ -70,32 +69,26 @@ function Divider({
   )
 }
 
-export default function PaneView({ node, tabActive, focusedPaneId, actions, settings }: Props): JSX.Element {
+/**
+ * Pure layout: renders the split/leaf structure (flex tree + drag dividers
+ * + focus ring) but never the terminal content itself. Each leaf is just a
+ * slot div registered into `slotStore` under its permanent pane id — the
+ * flat, App-level list of TerminalHost components portals the actual
+ * TerminalView into whichever slot currently exists for that id. That
+ * indirection is what lets this tree freely restructure (splitting,
+ * closing siblings, collapsing) without ever unmounting a terminal: a
+ * leaf's own div can come and go, but the pane id — and the portaled
+ * TerminalView/xterm/PTY behind it — never does.
+ */
+export default function PaneView({ node, tabActive, focusedPaneId, actions }: Props): JSX.Element {
   if (node.type === 'leaf') {
     const focused = tabActive && node.id === focusedPaneId
     return (
       <div
+        ref={(el) => slotStore.register(node.id, el)}
         className={`relative min-h-0 min-w-0 flex-1 ${focused ? 'ring-1 ring-inset ring-accent' : ''}`}
         onMouseDown={() => actions.onFocus(node.id)}
-      >
-        <TerminalView
-          shellKey={node.shellKey}
-          initialCommand={node.initialCommand}
-          visible={tabActive}
-          focused={focused}
-          settings={settings}
-          onExit={() => actions.onExit(node.id)}
-          onTitleChange={(title) => actions.onTitleChange(node.id, title)}
-          onNewTab={actions.onNewTab}
-          onCloseTab={() => actions.onClosePane(node.id)}
-          onNextTab={actions.onNextTab}
-          onPrevTab={actions.onPrevTab}
-          onSelectTabIndex={actions.onSelectTabIndex}
-          onSplitRight={() => actions.onSplitRight(node.id)}
-          onSplitDown={() => actions.onSplitDown(node.id)}
-          onFocusAdjacent={actions.onFocusAdjacent}
-        />
-      </div>
+      />
     )
   }
 
@@ -112,7 +105,6 @@ export default function PaneView({ node, tabActive, focusedPaneId, actions, sett
               tabActive={tabActive}
               focusedPaneId={focusedPaneId}
               actions={actions}
-              settings={settings}
             />
           </div>
           {i < node.children.length - 1 && (

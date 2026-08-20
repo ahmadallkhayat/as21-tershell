@@ -9,9 +9,6 @@ interface Props {
   onChange: (hex: string) => void
 }
 
-const PICKER_SATURATION = 72
-const PICKER_LIGHTNESS = 60
-
 function hslToHex(h: number, s: number, l: number): string {
   const sf = s / 100
   const lf = l / 100
@@ -25,34 +22,91 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`
 }
 
-function hexToHue(hex: string): number {
+interface Hsl {
+  h: number
+  s: number
+  l: number
+}
+
+function hexToHsl(hex: string): Hsl {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
-  if (!m) return 0
+  if (!m) return { h: 0, s: 0, l: 0 }
   const r = parseInt(m[1].slice(0, 2), 16) / 255
   const g = parseInt(m[1].slice(2, 4), 16) / 255
   const b = parseInt(m[1].slice(4, 6), 16) / 255
   const max = Math.max(r, g, b)
   const min = Math.min(r, g, b)
-  if (max === min) return 0
+  const l = (max + min) / 2
+  if (max === min) return { h: 0, s: 0, l: l * 100 }
   const d = max - min
+  const s = d / (1 - Math.abs(2 * l - 1))
   let h: number
   if (max === r) h = ((g - b) / d) % 6
   else if (max === g) h = (b - r) / d + 2
   else h = (r - g) / d + 4
   h *= 60
-  return h < 0 ? h + 360 : h
+  if (h < 0) h += 360
+  return { h, s: s * 100, l: l * 100 }
 }
 
 function isValidHex(hex: string): boolean {
   return /^#[0-9a-f]{6}$/i.test(hex)
 }
 
+/** One draggable gradient track, shared by the hue/saturation/lightness
+ * sliders below — factored out so each only supplies its own gradient and
+ * drag-to-ratio callback. */
+function SliderTrack({
+  background,
+  thumbPosition,
+  thumbColor,
+  onDrag
+}: {
+  background: string
+  thumbPosition: number
+  thumbColor: string
+  onDrag: (ratio: number) => void
+}): JSX.Element {
+  const trackRef = useRef<HTMLDivElement>(null)
+  const draggingRef = useRef(false)
+
+  const dragTo = (clientX: number): void => {
+    const track = trackRef.current
+    if (!track) return
+    const rect = track.getBoundingClientRect()
+    onDrag(Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)))
+  }
+
+  return (
+    <div
+      ref={trackRef}
+      className="relative h-3 cursor-pointer rounded-full"
+      style={{ background }}
+      onPointerDown={(e) => {
+        draggingRef.current = true
+        e.currentTarget.setPointerCapture(e.pointerId)
+        dragTo(e.clientX)
+      }}
+      onPointerMove={(e) => {
+        if (draggingRef.current) dragTo(e.clientX)
+      }}
+      onPointerUp={(e) => {
+        draggingRef.current = false
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      }}
+    >
+      <div
+        className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)]"
+        style={{ left: `${thumbPosition * 100}%`, backgroundColor: thumbColor }}
+      />
+    </div>
+  )
+}
+
 export default function ColorPicker({ value, onChange }: Props): JSX.Element {
   const [open, setOpen] = useState(false)
   const [hexDraft, setHexDraft] = useState(value)
   const [anchor, setAnchor] = useState({ left: 0, top: 0 })
-  const trackRef = useRef<HTMLDivElement>(null)
-  const draggingRef = useRef(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
 
@@ -77,15 +131,7 @@ export default function ColorPicker({ value, onChange }: Props): JSX.Element {
     return () => document.removeEventListener('mousedown', close)
   }, [open])
 
-  const hue = hexToHue(value)
-
-  const setHueFromClientX = (clientX: number): void => {
-    const track = trackRef.current
-    if (!track) return
-    const rect = track.getBoundingClientRect()
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
-    onChange(hslToHex(ratio * 360, PICKER_SATURATION, PICKER_LIGHTNESS))
-  }
+  const { h: hue, s: saturation, l: lightness } = hexToHsl(value)
 
   const commitHexDraft = (): void => {
     if (isValidHex(hexDraft)) onChange(hexDraft)
@@ -131,34 +177,35 @@ export default function ColorPicker({ value, onChange }: Props): JSX.Element {
               ))}
             </div>
 
-            <div
-              ref={trackRef}
-              className="relative mb-3 h-3 cursor-pointer rounded-full"
-              style={{
-                background:
-                  'linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)'
-              }}
-              onPointerDown={(e) => {
-                draggingRef.current = true
-                e.currentTarget.setPointerCapture(e.pointerId)
-                setHueFromClientX(e.clientX)
-              }}
-              onPointerMove={(e) => {
-                if (draggingRef.current) setHueFromClientX(e.clientX)
-              }}
-              onPointerUp={(e) => {
-                draggingRef.current = false
-                e.currentTarget.releasePointerCapture(e.pointerId)
-              }}
-            >
-              <div
-                className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)]"
-                style={{
-                  left: `${(hue / 360) * 100}%`,
-                  backgroundColor: hslToHex(hue, PICKER_SATURATION, PICKER_LIGHTNESS)
-                }}
-              />
+            <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-muted">
+              Hue
             </div>
+            <SliderTrack
+              background="linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)"
+              thumbPosition={hue / 360}
+              thumbColor={hslToHex(hue, saturation, lightness)}
+              onDrag={(ratio) => onChange(hslToHex(ratio * 360, saturation, lightness))}
+            />
+
+            <div className="mb-1 mt-3 flex items-center justify-between text-[10px] uppercase tracking-wide text-muted">
+              Saturation
+            </div>
+            <SliderTrack
+              background={`linear-gradient(to right, ${hslToHex(hue, 0, lightness)}, ${hslToHex(hue, 100, lightness)})`}
+              thumbPosition={saturation / 100}
+              thumbColor={hslToHex(hue, saturation, lightness)}
+              onDrag={(ratio) => onChange(hslToHex(hue, ratio * 100, lightness))}
+            />
+
+            <div className="mb-1 mt-3 flex items-center justify-between text-[10px] uppercase tracking-wide text-muted">
+              Lightness
+            </div>
+            <SliderTrack
+              background={`linear-gradient(to right, #000000, ${hslToHex(hue, saturation, 50)}, #ffffff)`}
+              thumbPosition={lightness / 100}
+              thumbColor={hslToHex(hue, saturation, lightness)}
+              onDrag={(ratio) => onChange(hslToHex(hue, saturation, ratio * 100))}
+            />
 
             <TextInput
               value={hexDraft}
@@ -167,7 +214,7 @@ export default function ColorPicker({ value, onChange }: Props): JSX.Element {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') commitHexDraft()
               }}
-              className="w-full"
+              className="mt-3 w-full"
             />
           </div>,
           document.body
