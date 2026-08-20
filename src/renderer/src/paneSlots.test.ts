@@ -36,6 +36,35 @@ describe('slotStore', () => {
     expect(slotStore.get('pane-move')).toBe(newEl)
   })
 
+  it('survives a StrictMode remount that reattaches the same element', async () => {
+    // React StrictMode simulates an unmount/remount by detaching and
+    // reattaching the very same DOM node. An earlier version keyed the
+    // deferred delete on element identity, so the reattach was a no-op
+    // early-return and the delete still fired — stranding the pane with no
+    // slot, hence no terminal and no pty at all.
+    const el = fakeEl()
+    slotStore.register('pane-strict', el)
+    slotStore.register('pane-strict', null)
+    slotStore.register('pane-strict', el)
+
+    expect(slotStore.get('pane-strict')).toBe(el)
+    await Promise.resolve()
+    expect(slotStore.get('pane-strict')).toBe(el)
+  })
+
+  it('still deletes after a detach even once the id has been reused before', async () => {
+    const el = fakeEl()
+    slotStore.register('pane-cycle', el)
+    slotStore.register('pane-cycle', null)
+    slotStore.register('pane-cycle', el)
+    await Promise.resolve()
+
+    // A genuine removal after that cycle must still take effect.
+    slotStore.register('pane-cycle', null)
+    await Promise.resolve()
+    expect(slotStore.get('pane-cycle')).toBeUndefined()
+  })
+
   it('actually removes a slot that is never re-registered', async () => {
     const el = fakeEl()
     slotStore.register('pane-gone', el)

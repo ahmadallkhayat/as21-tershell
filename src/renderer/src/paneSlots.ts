@@ -12,9 +12,24 @@ import { useSyncExternalStore } from 'react'
 class SlotStore {
   private slots = new Map<string, HTMLElement>()
   private listeners = new Set<() => void>()
+  /** Bumped by every registration for an id. A deferred delete only fires
+   * if no registration happened after it was scheduled. */
+  private generation = new Map<string, number>()
+
+  private bump(id: string): number {
+    const next = (this.generation.get(id) ?? 0) + 1
+    this.generation.set(id, next)
+    return next
+  }
 
   register = (id: string, el: HTMLElement | null): void => {
     if (el) {
+      // Bump before the identity check below: re-registering the *same*
+      // element still has to cancel a pending delete. React StrictMode
+      // remounts by detaching and reattaching the very same DOM node, so
+      // without this the delete scheduled by the detach would still fire
+      // and strand the pane with no slot — no terminal, no pty.
+      this.bump(id)
       if (this.slots.get(id) === el) return
       this.slots.set(id, el)
       this.notify()
@@ -29,17 +44,16 @@ class SlotStore {
     // (TerminalHost) could observe a "no slot" state in between and
     // unmount the portaled terminal — which is exactly the split-restarts-
     // the-terminal bug this store exists to prevent. Deferring the delete
-    // to a microtask gives that synchronous re-registration a chance to
-    // land first; if it does, `current` will have moved on and we skip the
-    // delete entirely. Only a pane that's genuinely gone (nothing
-    // re-registers its id) actually gets removed.
-    const current = this.slots.get(id)
-    if (current === undefined) return
+    // to a microtask gives that re-registration a chance to land first.
+    // Only a pane that's genuinely gone (nothing re-registers its id)
+    // actually gets removed.
+    if (!this.slots.has(id)) return
+    const scheduled = this.bump(id)
     queueMicrotask(() => {
-      if (this.slots.get(id) === current) {
-        this.slots.delete(id)
-        this.notify()
-      }
+      if (this.generation.get(id) !== scheduled) return
+      this.slots.delete(id)
+      this.generation.delete(id)
+      this.notify()
     })
   }
 
