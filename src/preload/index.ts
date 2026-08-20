@@ -30,6 +30,12 @@ const api = {
   pickFolder: (defaultPath?: string): Promise<string | null> =>
     ipcRenderer.invoke('dialog:pickFolder', defaultPath),
 
+  saveFile: (content: string, defaultPath?: string): Promise<boolean> =>
+    ipcRenderer.invoke('dialog:saveFile', content, defaultPath),
+
+  openExternal: (url: string): Promise<void> =>
+    ipcRenderer.invoke('shell:openExternal', url),
+
   createSession: (
     shellKey: string,
     cols: number,

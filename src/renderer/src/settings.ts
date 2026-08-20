@@ -18,6 +18,8 @@ export interface Settings {
   fontFamily: string
   fontSize: number
   cursorStyle: 'block' | 'bar' | 'underline'
+  fontLigatures: boolean
+  backgroundOpacity: number
   accentColor: string
   defaultShell: string
   themeMode: ThemeMode
@@ -37,6 +39,8 @@ export const DEFAULT_SETTINGS: Settings = {
   fontFamily: '"Cascadia Code", Consolas, monospace',
   fontSize: 14,
   cursorStyle: 'block',
+  fontLigatures: true,
+  backgroundOpacity: 0.95,
   accentColor: '#7c6cff',
   defaultShell: 'powershell',
   themeMode: 'system',

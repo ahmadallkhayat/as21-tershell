@@ -1,4 +1,6 @@
 import { useRef } from 'react'
+import { motion } from 'framer-motion'
+import { contextMenuVariants } from './motion'
 import { useClampToViewport } from './useClampToViewport'
 
 interface Props {
@@ -9,6 +11,8 @@ interface Props {
   onPaste: () => void
   onSplitRight: () => void
   onSplitDown: () => void
+  onClear?: () => void
+  onExportLog?: () => void
   onClosePane: () => void
 }
 
@@ -20,81 +24,129 @@ export default function ContextMenu({
   onPaste,
   onSplitRight,
   onSplitDown,
+  onClear,
+  onExportLog,
   onClosePane
 }: Props): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   useClampToViewport(ref, true, [x, y])
 
   return (
-    <div
+    <motion.div
       ref={ref}
       role="menu"
-      className="absolute z-30 min-w-[160px] overflow-hidden rounded-md border border-hover-strong bg-hover shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+      variants={contextMenuVariants}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      className="absolute z-30 min-w-[190px] overflow-hidden rounded-lg border border-line/90 bg-titlebar/95 p-1 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.65)] [-webkit-app-region:no-drag]"
       style={{ left: x, top: y }}
     >
       <button
         type="button"
         role="menuitem"
         disabled={!canCopy}
-        className="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-hover-strong disabled:cursor-default disabled:text-muted disabled:hover:bg-transparent"
+        className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-xs text-fg transition-colors hover:bg-hover hover:text-bright disabled:cursor-default disabled:text-muted disabled:hover:bg-transparent"
         onMouseDown={(e) => {
           e.preventDefault()
           onCopy()
         }}
       >
-        Copy
-        <span className="ml-2 text-[10px] text-muted">Ctrl+Shift+C</span>
+        <span>Copy</span>
+        <kbd className="rounded border border-line/60 bg-surface/50 px-1.5 py-0.5 font-mono text-[9px] text-muted">
+          Ctrl+Shift+C
+        </kbd>
       </button>
       <button
         type="button"
         role="menuitem"
-        className="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-hover-strong"
+        className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-xs text-fg transition-colors hover:bg-hover hover:text-bright"
         onMouseDown={(e) => {
           e.preventDefault()
           onPaste()
         }}
       >
-        Paste
-        <span className="ml-2 text-[10px] text-muted">Ctrl+Shift+V</span>
+        <span>Paste</span>
+        <kbd className="rounded border border-line/60 bg-surface/50 px-1.5 py-0.5 font-mono text-[9px] text-muted">
+          Ctrl+Shift+V
+        </kbd>
       </button>
-      <div className="border-t border-line" />
+      <div className="my-1 border-t border-line/60" />
       <button
         type="button"
         role="menuitem"
-        className="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-hover-strong"
+        className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-xs text-fg transition-colors hover:bg-hover hover:text-bright"
         onMouseDown={(e) => {
           e.preventDefault()
           onSplitRight()
         }}
       >
-        Split Right
-        <span className="ml-2 text-[10px] text-muted">Ctrl+Shift+D</span>
+        <span>Split Right</span>
+        <kbd className="rounded border border-line/60 bg-surface/50 px-1.5 py-0.5 font-mono text-[9px] text-muted">
+          Ctrl+Shift+D
+        </kbd>
       </button>
       <button
         type="button"
         role="menuitem"
-        className="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-hover-strong"
+        className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-xs text-fg transition-colors hover:bg-hover hover:text-bright"
         onMouseDown={(e) => {
           e.preventDefault()
           onSplitDown()
         }}
       >
-        Split Down
-        <span className="ml-2 text-[10px] text-muted">Ctrl+Shift+E</span>
+        <span>Split Down</span>
+        <kbd className="rounded border border-line/60 bg-surface/50 px-1.5 py-0.5 font-mono text-[9px] text-muted">
+          Ctrl+Shift+E
+        </kbd>
       </button>
-      <div className="border-t border-line" />
+      {onClear && (
+        <>
+          <div className="my-1 border-t border-line/60" />
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-xs text-fg transition-colors hover:bg-hover hover:text-bright"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              onClear()
+            }}
+          >
+            <span>Clear Buffer</span>
+            <kbd className="rounded border border-line/60 bg-surface/50 px-1.5 py-0.5 font-mono text-[9px] text-muted">
+              Ctrl+K
+            </kbd>
+          </button>
+        </>
+      )}
+      {onExportLog && (
+        <button
+          type="button"
+          role="menuitem"
+          className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-xs text-fg transition-colors hover:bg-hover hover:text-bright"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            onExportLog()
+          }}
+        >
+          <span>Export Log to File…</span>
+        </button>
+      )}
+      <div className="my-1 border-t border-line/60" />
       <button
         type="button"
         role="menuitem"
-        className="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-hover-strong"
+        className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-xs text-fg transition-colors hover:bg-hover hover:text-danger"
         onMouseDown={(e) => {
           e.preventDefault()
           onClosePane()
         }}
       >
-        Close Pane
-        <span className="ml-2 text-[10px] text-muted">Ctrl+Shift+W</span>
+        <span>Close Pane</span>
+        <kbd className="rounded border border-line/60 bg-surface/50 px-1.5 py-0.5 font-mono text-[9px] text-muted">
+          Ctrl+Shift+W
+        </kbd>
       </button>
-    </div>
+    </motion.div>
   )
 }

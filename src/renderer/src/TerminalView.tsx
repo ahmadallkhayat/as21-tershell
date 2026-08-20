@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon, type ISearchOptions } from '@xterm/addon-search'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { commitToHistory, getSuggestions } from './suggestions'
 import SuggestionDropdown from './SuggestionDropdown'
@@ -84,6 +85,8 @@ interface Props {
   onSplitDown: () => void
   onFocusAdjacent: (direction: 'left' | 'right' | 'up' | 'down') => void
   onZoom: (delta: number | 'reset') => void
+  onOpenSettings?: () => void
+  onShowShortcuts?: () => void
 }
 
 interface DropdownState {
@@ -111,6 +114,90 @@ interface ContextMenuState {
  * gives the true cell size with no drift across long lines, and its offset
  * accounts for the wrapper's padding automatically.
  */
+function isRenderReady(term: Terminal | null): boolean {
+  if (!term) return false
+  try {
+    const core = (
+      term as unknown as {
+        _core?: {
+          _renderService?: {
+            _renderer?: { value?: unknown }
+            dimensions?: {
+              css?: { cell?: { height?: number; width?: number } }
+              actualCellWidth?: number
+              actualCellHeight?: number
+            }
+          }
+        }
+      }
+    )._core
+    const dims = core?._renderService?.dimensions
+    const cellH = dims?.css?.cell?.height ?? 0
+    const cellW = dims?.css?.cell?.width ?? 0
+    return Boolean(
+      core?._renderService?._renderer?.value &&
+        cellH > 0 &&
+        cellW > 0
+    )
+  } catch {
+    return false
+  }
+}
+
+function safeFit(fit: FitAddon | null, term: Terminal | null, container: HTMLElement | null): void {
+  if (!fit || !term || !container) return
+  if (!container.isConnected || container.clientWidth <= 0 || container.clientHeight <= 0) return
+  if (!isRenderReady(term)) {
+    requestAnimationFrame(() => {
+      try {
+        if (
+          container.isConnected &&
+          container.clientWidth > 0 &&
+          container.clientHeight > 0 &&
+          isRenderReady(term)
+        ) {
+          fit.fit()
+        }
+      } catch {
+        // Suppress dimensions error on initial layout
+      }
+    })
+    return
+  }
+  try {
+    fit.fit()
+  } catch {
+    // Suppress errors when element dimensions are not ready or detached
+  }
+}
+
+function safeFocus(term: Terminal | null, container: HTMLElement | null): void {
+  if (!term || !container) return
+  if (!container.isConnected || container.clientWidth <= 0 || container.clientHeight <= 0) return
+  if (!isRenderReady(term)) {
+    requestAnimationFrame(() => {
+      try {
+        if (
+          container.isConnected &&
+          container.clientWidth > 0 &&
+          container.clientHeight > 0 &&
+          isRenderReady(term)
+        ) {
+          term.focus()
+        }
+      } catch {
+        // Suppress focus error before first render pass
+      }
+    })
+    return
+  }
+  try {
+    term.focus()
+  } catch {
+    // Suppress focus error
+  }
+}
+
 function getCursorAnchor(
   term: Terminal,
   container: HTMLElement,
@@ -135,6 +222,20 @@ function getCursorAnchor(
   }
 }
 
+function extractCommandLine(term: Terminal): string {
+  try {
+    const buf = term.buffer.active
+    const line = buf.getLine(buf.baseY + buf.cursorY)
+    if (!line) return ''
+    const fullText = line.translateToString(false).slice(0, buf.cursorX)
+    const match = fullText.match(/(?:PS\s+[^>]*>|[^>%$#\n]+[>%$#])\s*(.*)$/)
+    if (match) return match[1]
+    return fullText.trimStart()
+  } catch {
+    return ''
+  }
+}
+
 export default function TerminalView({
   paneId,
   shellKey,
@@ -155,7 +256,9 @@ export default function TerminalView({
   onSplitRight,
   onSplitDown,
   onFocusAdjacent,
-  onZoom
+  onZoom,
+  onOpenSettings,
+  onShowShortcuts
 }: Props): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -184,6 +287,10 @@ export default function TerminalView({
   onFocusAdjacentRef.current = onFocusAdjacent
   const onZoomRef = useRef(onZoom)
   onZoomRef.current = onZoom
+  const onOpenSettingsRef = useRef(onOpenSettings)
+  onOpenSettingsRef.current = onOpenSettings
+  const onShowShortcutsRef = useRef(onShowShortcuts)
+  onShowShortcutsRef.current = onShowShortcuts
 
   const [dropdown, setDropdown] = useState<DropdownState | null>(null)
   const dropdownRef = useRef<DropdownState | null>(null)
@@ -222,17 +329,29 @@ export default function TerminalView({
     })
     const fit = new FitAddon()
     const search = new SearchAddon()
+    const webLinks = new WebLinksAddon((_event, uri) => {
+      window.api.openExternal(uri)
+    })
     term.loadAddon(fit)
     term.loadAddon(search)
+    term.loadAddon(webLinks)
     searchRef.current = search
     term.open(container)
-    fit.fit()
+    requestAnimationFrame(() => {
+      safeFit(fit, term, container)
+      if (focused) safeFocus(term, container)
+    })
 
     termRef.current = term
     fitRef.current = fit
 
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== 'keydown') return true
+
+      if (event.key === 'F1' || (event.ctrlKey && event.shiftKey && (event.key === '?' || event.key === '/'))) {
+        onShowShortcutsRef.current?.()
+        return false
+      }
 
       if (event.altKey && !event.ctrlKey && !event.shiftKey) {
         if (event.key === 'ArrowLeft') {
@@ -256,6 +375,16 @@ export default function TerminalView({
 
       if (!event.ctrlKey) return true
       const key = event.key.toLowerCase()
+
+      if (key === 'k' && !event.shiftKey) {
+        term.clear()
+        return false
+      }
+
+      if (key === ',') {
+        onOpenSettingsRef.current?.()
+        return false
+      }
 
       if (key === 'tab') {
         if (event.shiftKey) onPrevTabRef.current()
@@ -347,7 +476,8 @@ export default function TerminalView({
         search.clearDecorations()
         matchInfoRef.current = { index: -1, count: 0 }
       },
-      getResults: () => matchInfoRef.current
+      getResults: () => matchInfoRef.current,
+      open: () => setSearchOpen(true)
     })
 
     // Shells report their working directory with OSC 7; tracking it is
@@ -375,17 +505,17 @@ export default function TerminalView({
     let trusted = true
 
     const closeDropdown = (): void => setDropdown(null)
-    let suggestionsPending = false
+    markDesyncedRef.current = closeDropdown
 
     const inAltScreen = (): boolean => term.buffer.active.type === 'alternate'
 
-    const syncDropdown = (): void => {
-      suggestionsPending = false
-      if (!trusted || inAltScreen()) {
+    const syncDropdown = (overrideBuffer?: string): void => {
+      if (inAltScreen()) {
         closeDropdown()
         return
       }
-      const items = getSuggestions(shellKey, lineBuffer)
+      const bufferToUse = overrideBuffer !== undefined ? overrideBuffer : (lineBuffer || extractCommandLine(term))
+      const items = getSuggestions(shellKey, bufferToUse)
       if (items.length === 0) {
         closeDropdown()
         return
@@ -396,25 +526,12 @@ export default function TerminalView({
       setDropdown({ items, selected: 0, ...anchor })
     }
 
-    // Cursor position only reflects reality after the pty echoes the
-    // keystroke back and xterm renders it, so defer positioning to that
-    // point rather than computing it synchronously on keypress.
-    const requestSync = (): void => {
-      suggestionsPending = true
-    }
-
-    const markDesynced = (): void => {
-      trusted = false
-      closeDropdown()
-    }
-    markDesyncedRef.current = markDesynced
-
     const acceptSuggestion = (index: number): void => {
-      if (!trusted) return
       const items = dropdownRef.current?.items
       const chosen = items?.[index]
       if (!chosen || !ptyIdRef.current) return
-      const backspaces = '\x7f'.repeat(lineBuffer.length)
+      const currentInput = lineBuffer || extractCommandLine(term)
+      const backspaces = '\x7f'.repeat(currentInput.length)
       window.api.write(ptyIdRef.current, backspaces + chosen)
       lineBuffer = chosen
       closeDropdown()
@@ -447,7 +564,7 @@ export default function TerminalView({
     const offData = window.api.onData((id, data) => {
       if (id !== ptyIdRef.current) return
       term.write(data, () => {
-        if (suggestionsPending) syncDropdown()
+        if (lineBuffer) syncDropdown()
       })
     })
     const offExit = window.api.onExit((id, exitCode) => {
@@ -496,40 +613,38 @@ export default function TerminalView({
       window.api.write(ptyIdRef.current, data)
 
       if (data === '\r' || data === '\n') {
-        if (trusted) commitToHistory(shellKey, lineBuffer)
+        if (lineBuffer) commitToHistory(shellKey, lineBuffer)
         lineBuffer = ''
-        trusted = true
         closeDropdown()
         return
       }
       if (data === '\x03') {
         lineBuffer = ''
-        trusted = true
         closeDropdown()
         return
       }
       if (data === '\x7f' || data === '\b') {
-        if (trusted) {
-          lineBuffer = lineBuffer.slice(0, -1)
-          requestSync()
-        }
+        lineBuffer = lineBuffer.slice(0, -1)
+        syncDropdown(lineBuffer)
         return
       }
       // Anything else we can't confidently model as plain text: arrows,
-      // Home/End, Ctrl+U/W/K, shell-side tab completion, escape sequences
-      // in general (including pasted bracketed-paste content).
+      // Home/End, Ctrl+U/W/K, shell-side tab completion, escape sequences.
       if (data === '\t' || data === '\x15' || data === '\x17' || data === '\x0b' || data.startsWith('\x1b')) {
-        markDesynced()
+        if (data.startsWith('\x1b')) {
+          closeDropdown()
+        }
         return
       }
-      if (!trusted) return
       lineBuffer += data
-      requestSync()
+      syncDropdown(lineBuffer)
     })
 
     const resizeObserver = new ResizeObserver(() => {
-      fit.fit()
-      if (ptyIdRef.current) window.api.resize(ptyIdRef.current, term.cols, term.rows)
+      safeFit(fit, term, container)
+      if (ptyIdRef.current && term.cols > 0 && term.rows > 0) {
+        window.api.resize(ptyIdRef.current, term.cols, term.rows)
+      }
     })
     resizeObserver.observe(container)
 
@@ -551,27 +666,40 @@ export default function TerminalView({
     }
   }, [shellKey, paneId])
 
+  const isFirstRender = useRef(true)
+
   useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
     const term = termRef.current
     if (!term) return
-    // Assign only the specific fields we want — term.options is a proxy
-    // where reassigning readonly fields like cols/rows throws, so spreading
-    // the whole current options object back in (which includes those) is
-    // not safe here.
-    term.options.fontFamily = settings.fontFamily
-    term.options.fontSize = settings.fontSize
-    term.options.cursorStyle = settings.cursorStyle
-    term.options.scrollback = settings.scrollback
-    term.options.theme = {
-      ...TERMINAL_COLORS[resolveThemeMode(settings.themeMode)],
-      cursor: settings.accentColor
+
+    const applyOptions = (): void => {
+      try {
+        if (term.options.fontFamily !== settings.fontFamily) term.options.fontFamily = settings.fontFamily
+        if (term.options.fontSize !== settings.fontSize) term.options.fontSize = settings.fontSize
+        if (term.options.cursorStyle !== settings.cursorStyle) term.options.cursorStyle = settings.cursorStyle
+        if (term.options.scrollback !== settings.scrollback) term.options.scrollback = settings.scrollback
+        term.options.theme = {
+          ...TERMINAL_COLORS[resolveThemeMode(settings.themeMode)],
+          cursor: settings.accentColor
+        }
+        safeFit(fitRef.current, term, containerRef.current)
+        if (ptyIdRef.current && term.cols > 0 && term.rows > 0) {
+          window.api.resize(ptyIdRef.current, term.cols, term.rows)
+        }
+      } catch {
+        // Suppress options update before render service is fully ready
+      }
     }
-    fitRef.current?.fit()
-    if (ptyIdRef.current) window.api.resize(ptyIdRef.current, term.cols, term.rows)
-    // Only the fields actually read above belong in the dependency array —
-    // settings.defaultShell (or any other future field) changing shouldn't
-    // re-fit and re-resize every open terminal for no visible reason.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    if (!isRenderReady(term)) {
+      requestAnimationFrame(applyOptions)
+    } else {
+      applyOptions()
+    }
   }, [
     settings.fontFamily,
     settings.fontSize,
@@ -586,10 +714,14 @@ export default function TerminalView({
     const media = window.matchMedia('(prefers-color-scheme: light)')
     const onChange = (): void => {
       const term = termRef.current
-      if (!term) return
-      term.options.theme = {
-        ...TERMINAL_COLORS[resolveThemeMode(settings.themeMode)],
-        cursor: settings.accentColor
+      if (!term || !isRenderReady(term)) return
+      try {
+        term.options.theme = {
+          ...TERMINAL_COLORS[resolveThemeMode(settings.themeMode)],
+          cursor: settings.accentColor
+        }
+      } catch {
+        // Suppress theme update error
       }
     }
     media.addEventListener('change', onChange)
@@ -598,16 +730,16 @@ export default function TerminalView({
 
   useEffect(() => {
     if (visible) {
-      fitRef.current?.fit()
-      termRef.current?.focus()
-      if (ptyIdRef.current && termRef.current) {
+      safeFit(fitRef.current, termRef.current, containerRef.current)
+      safeFocus(termRef.current, containerRef.current)
+      if (ptyIdRef.current && termRef.current && termRef.current.cols > 0 && termRef.current.rows > 0) {
         window.api.resize(ptyIdRef.current, termRef.current.cols, termRef.current.rows)
       }
     }
   }, [visible])
 
   useEffect(() => {
-    if (visible && focused) termRef.current?.focus()
+    if (visible && focused) safeFocus(termRef.current, containerRef.current)
   }, [focused, visible])
 
   useEffect(() => {
@@ -689,7 +821,52 @@ export default function TerminalView({
     setSearchQuery('')
     matchInfoRef.current = { index: -1, count: 0 }
     setMatchInfo({ index: -1, count: 0 })
-    termRef.current?.focus()
+    safeFocus(termRef.current, containerRef.current)
+  }
+
+  const [isDragOver, setIsDragOver] = useState(false)
+
+  const handleExportLog = async (): Promise<void> => {
+    const term = termRef.current
+    if (!term) return
+    const buf = term.buffer.active
+    const lines: string[] = []
+    for (let i = 0; i < buf.length; i++) {
+      const line = buf.getLine(i)
+      if (line) lines.push(line.translateToString(true))
+    }
+    const content = lines.join('\n').trimEnd()
+    await window.api.saveFile(content, `${shellKey}-session.log`)
+  }
+
+  const handleClear = (): void => {
+    termRef.current?.clear()
+  }
+
+  const handleDragOver = (e: React.DragEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!isDragOver) setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+    const files = e.dataTransfer.files
+    if (files.length > 0 && ptyIdRef.current) {
+      const paths = Array.from(files).map((f) => {
+        const p = (f as unknown as { path?: string }).path || f.name
+        return p.includes(' ') ? `"${p}"` : p
+      })
+      window.api.write(ptyIdRef.current, paths.join(' '))
+    }
   }
 
   const displayedMatches = searchToggles.allPanes ? globalResults(paneId, matchInfo) : matchInfo
@@ -697,8 +874,13 @@ export default function TerminalView({
   return (
     <div
       ref={wrapperRef}
-      className="terminal-container absolute inset-0 p-2"
+      className={`terminal-container absolute inset-0 p-2 transition-all ${
+        isDragOver ? 'ring-2 ring-inset ring-accent bg-accent-soft/30' : ''
+      }`}
       style={{ display: visible ? 'block' : 'none' }}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       onContextMenu={(e) => {
         e.preventDefault()
         const rect = e.currentTarget.getBoundingClientRect()
@@ -710,6 +892,11 @@ export default function TerminalView({
       }}
     >
       <div ref={containerRef} className="h-full w-full" />
+      {isDragOver && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface/70 backdrop-blur-xs text-accent font-medium text-xs">
+          Drop files to paste paths
+        </div>
+      )}
       {isSplit && (
         <button
           type="button"
@@ -744,6 +931,14 @@ export default function TerminalView({
           onSplitDown={() => {
             setContextMenu(null)
             onSplitDownRef.current()
+          }}
+          onClear={() => {
+            setContextMenu(null)
+            handleClear()
+          }}
+          onExportLog={() => {
+            setContextMenu(null)
+            handleExportLog()
           }}
           onClosePane={() => {
             setContextMenu(null)

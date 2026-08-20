@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from 'react'
+import { motion } from 'framer-motion'
+import { modalBackdropVariants, modalCardVariants } from './motion'
 import {
   DEFAULT_SETTINGS,
   FONT_OPTIONS,
@@ -170,13 +172,20 @@ export default function SettingsPanel({ settings, profiles, onChange, onClose }:
   }
 
   return (
-    <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/50"
+    <motion.div
+      variants={modalBackdropVariants}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 backdrop-blur-sm [-webkit-app-region:no-drag]"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="w-[440px] overflow-hidden rounded-xl border border-hover-strong bg-titlebar shadow-[0_24px_64px_rgba(0,0,0,0.55)]">
+      <motion.div
+        variants={modalCardVariants}
+        className="w-[460px] overflow-hidden rounded-2xl border border-line/90 bg-titlebar/98 backdrop-blur-2xl shadow-[0_32px_80px_rgba(0,0,0,0.7)] [-webkit-app-region:no-drag]"
+      >
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <span className="text-sm font-semibold text-bright">Settings</span>
           <button
@@ -207,6 +216,21 @@ export default function SettingsPanel({ settings, profiles, onChange, onClose }:
             <ColorPicker value={settings.accentColor} onChange={(hex) => update('accentColor', hex)} />
           </Field>
 
+          <Field label="Window opacity">
+            <Select
+              value={String(settings.backgroundOpacity ?? 0.95)}
+              options={[
+                { value: '1', label: '100% (Solid)' },
+                { value: '0.95', label: '95% (Recommended)' },
+                { value: '0.9', label: '90% (Glass)' },
+                { value: '0.8', label: '80% (Translucent)' },
+                { value: '0.7', label: '70% (High Acrylic)' }
+              ]}
+              onChange={(v) => update('backgroundOpacity', Number(v))}
+              minWidth={160}
+            />
+          </Field>
+
           <SectionLabel>Terminal</SectionLabel>
 
           <Field label="Font family">
@@ -216,6 +240,10 @@ export default function SettingsPanel({ settings, profiles, onChange, onClose }:
               onChange={(f) => update('fontFamily', f)}
               minWidth={170}
             />
+          </Field>
+
+          <Field label="Font ligatures" hint="Enables symbol ligatures for Cascadia Code, Fira Code, etc.">
+            <Toggle value={settings.fontLigatures ?? true} onChange={(v) => update('fontLigatures', v)} />
           </Field>
 
           <Field label="Font size">
@@ -367,7 +395,7 @@ export default function SettingsPanel({ settings, profiles, onChange, onClose }:
             Reset to defaults
           </button>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   )
 }

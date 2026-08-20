@@ -128,3 +128,48 @@ export function SpinnerIcon({ className, size = DEFAULT_SIZE }: IconProps): JSX.
     </Icon>
   )
 }
+
+export function InfoIcon(props: IconProps): JSX.Element {
+  return (
+    <Icon {...props}>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 7.5V11.5M8 4.5V5.5" />
+    </Icon>
+  )
+}
+
+export function KeyboardIcon(props: IconProps): JSX.Element {
+  return (
+    <Icon {...props}>
+      <rect x="2" y="4" width="12" height="8" rx="1.5" />
+      <path d="M4.5 6.5H5.5M7.5 6.5H8.5M10.5 6.5H11.5M4.5 9.5H11.5" />
+    </Icon>
+  )
+}
+
+export function ExternalLinkIcon(props: IconProps): JSX.Element {
+  return (
+    <Icon {...props}>
+      <path d="M9.5 3.5H12.5V6.5M6.5 9.5L12.5 3.5M11.5 8.5V12.5H3.5V4.5H7.5" />
+    </Icon>
+  )
+}
+
+export function SearchIcon(props: IconProps): JSX.Element {
+  return (
+    <Icon {...props}>
+      <circle cx="6.5" cy="6.5" r="3.5" />
+      <path d="M9.5 9.5L13 13" />
+    </Icon>
+  )
+}
+
+export function TerminalIcon(props: IconProps): JSX.Element {
+  return (
+    <Icon {...props}>
+      <path d="M3 5.5L6.5 8L3 10.5M8 11.5H13" />
+    </Icon>
+  )
+}
+
+

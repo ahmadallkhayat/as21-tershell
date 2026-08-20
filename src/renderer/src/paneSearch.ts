@@ -13,9 +13,16 @@ export interface PaneSearchController {
   findPrevious(query: string, opts: ISearchOptions): boolean
   clear(): void
   getResults(): SearchResults
+  /** Opens the search overlay in this pane. */
+  open?: () => void
 }
 
 const controllers = new Map<string, PaneSearchController>()
+
+/** Opens the in-terminal search bar for the given pane. */
+export function openPaneSearch(paneId: string): void {
+  controllers.get(paneId)?.open?.()
+}
 
 /** Pane order for the active tab, left-to-right / top-to-bottom, so
  * cross-pane search advances in the order panes appear on screen rather
@@ -28,6 +35,7 @@ export function registerPaneSearch(paneId: string, controller: PaneSearchControl
   if (controller) controllers.set(paneId, controller)
   else controllers.delete(paneId)
 }
+
 
 export function setActiveTabPanes(paneIds: string[]): void {
   activeTabPanes = paneIds

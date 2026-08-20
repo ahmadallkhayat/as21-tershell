@@ -1,5 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { motion } from 'framer-motion'
+import { contextMenuVariants } from './motion'
 import { useClampToViewport } from './useClampToViewport'
+import { ACCENT_PRESETS } from './settings'
 
 interface Props {
   x: number
@@ -7,6 +10,7 @@ interface Props {
   canCloseOthers: boolean
   onRename: () => void
   onDuplicate: () => void
+  onSetColor?: (color?: string) => void
   onClose: () => void
   onCloseOthers: () => void
   onDismiss: () => void
@@ -18,11 +22,13 @@ export default function TabContextMenu({
   canCloseOthers,
   onRename,
   onDuplicate,
+  onSetColor,
   onClose,
   onCloseOthers,
   onDismiss
 }: Props): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
+  const [showColors, setShowColors] = useState(false)
   useClampToViewport(ref, true, [x, y])
 
   useEffect(() => {
@@ -45,34 +51,93 @@ export default function TabContextMenu({
     }
   }, [onDismiss])
 
-  const item = (label: string, action: () => void, disabled = false): JSX.Element => (
+  const item = (label: string, action: () => void, disabled = false, danger = false): JSX.Element => (
     <button
       type="button"
       role="menuitem"
       disabled={disabled}
-      className="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-hover-strong disabled:cursor-default disabled:text-muted disabled:hover:bg-transparent"
+      className={`flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs transition-colors ${
+        danger
+          ? 'text-fg hover:bg-hover hover:text-danger'
+          : 'text-fg hover:bg-hover hover:text-bright'
+      } disabled:cursor-default disabled:text-muted disabled:hover:bg-transparent`}
       onMouseDown={(e) => {
         e.preventDefault()
         e.stopPropagation()
         action()
       }}
     >
-      {label}
+      <span>{label}</span>
     </button>
   )
 
   return (
-    <div
+    <motion.div
       ref={ref}
       role="menu"
-      className="fixed z-50 min-w-[160px] overflow-hidden rounded-md border border-hover-strong bg-hover shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+      variants={contextMenuVariants}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      className="fixed z-50 min-w-[180px] overflow-hidden rounded-lg border border-line/90 bg-titlebar/95 p-1 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.65)] [-webkit-app-region:no-drag]"
       style={{ left: x, top: y }}
     >
-      {item('Rename', onRename)}
-      {item('Duplicate', onDuplicate)}
-      <div className="border-t border-line" />
-      {item('Close', onClose)}
-      {item('Close others', onCloseOthers, !canCloseOthers)}
-    </div>
+      {item('Rename Tab', onRename)}
+      {item('Duplicate Tab', onDuplicate)}
+      {onSetColor && (
+        <>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs text-fg transition-colors hover:bg-hover hover:text-bright"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setShowColors((v) => !v)
+            }}
+          >
+            <span>Set Tab Color</span>
+            <span className="text-[10px] text-muted">▶</span>
+          </button>
+          {showColors && (
+            <div className="my-1 border-y border-line/60 bg-hover/30 p-2">
+              <div className="mb-1.5 flex items-center justify-between text-[10px] text-muted">
+                <span>Color</span>
+                <button
+                  type="button"
+                  className="hover:text-fg underline text-[9px]"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onSetColor(undefined)
+                    onDismiss()
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+              <div className="grid grid-cols-5 gap-1.5">
+                {ACCENT_PRESETS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    className="h-5 w-5 rounded-full border border-line/80 transition-transform hover:scale-110 shadow-xs"
+                    style={{ backgroundColor: color }}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      onSetColor(color)
+                      onDismiss()
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+      <div className="my-1 border-t border-line/60" />
+      {item('Close Tab', onClose, false, true)}
+      {item('Close Other Tabs', onCloseOthers, !canCloseOthers)}
+    </motion.div>
   )
 }

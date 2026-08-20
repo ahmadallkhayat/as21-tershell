@@ -11,6 +11,12 @@ export function registerPanePty(paneId: string, ptyId: string | null): void {
   else ptyIdByPane.delete(paneId)
 }
 
+/** Returns the active PTY ID for a given pane ID if registered. */
+export function getPanePty(paneId: string): string | undefined {
+  return ptyIdByPane.get(paneId)
+}
+
+
 /** Base executables the app itself spawns as a shell — anything else
  * reported as the pty's foreground process is treated as "busy". */
 const SHELL_EXECUTABLES = new Set(['powershell.exe', 'pwsh.exe', 'cmd.exe'])

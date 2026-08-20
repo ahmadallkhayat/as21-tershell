@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { dropdownVariants } from './motion'
 import { TOOLS } from './tools'
 import {
   ClaudeLogo,
@@ -15,7 +17,6 @@ import {
   CloseIcon,
   DownloadIcon,
   FolderIcon,
-  GearIcon,
   MaximizeIcon,
   MinimizeIcon,
   PlusIcon,
@@ -25,7 +26,8 @@ import {
 import { useClampToViewport } from './useClampToViewport'
 import { useDragScroll } from './useDragScroll'
 import TabContextMenu from './TabContextMenu'
-import type { ShellProfile } from './settings'
+import MenuBar from './MenuBar'
+import type { ShellProfile, ThemeMode } from './settings'
 import iconUrl from '../../../resources/icon.png'
 
 interface Tab {
@@ -35,6 +37,8 @@ interface Tab {
   logoId?: string
   /** The shell profile's color, for the tab's dot. */
   color?: string
+  /** User-customized tab color override. */
+  customColor?: string
 }
 
 export interface AddTabOptions {
@@ -48,15 +52,31 @@ interface Props {
   tabs: Tab[]
   activeId: string
   profiles: ShellProfile[]
+  activeTheme: ThemeMode
   onSelect: (id: string) => void
   onClose: (id: string) => void
   onCloseOthers: (id: string) => void
-  onAdd: (shellKey: string, options?: AddTabOptions) => void
+  onAdd: (shellKey?: string, options?: AddTabOptions) => void
   onRename: (id: string, title: string) => void
   onDuplicate: (id: string) => void
   onReorder: (draggedId: string, targetId: string) => void
   onOpenFolder: () => void
   onOpenSettings: () => void
+  onSplitRight: () => void
+  onSplitDown: () => void
+  onCloseCurrentPane: () => void
+  onCopy: () => void
+  onPaste: () => void
+  onFind: () => void
+  onClearTerminal: () => void
+  onZoom: (delta: number | 'reset') => void
+  onNextTab: () => void
+  onPrevTab: () => void
+  onToggleTheme: (mode: ThemeMode) => void
+  onOpenCommandPalette?: () => void
+  onSetTabColor?: (id: string, color?: string) => void
+  onShowAbout: () => void
+  onShowShortcuts: () => void
 }
 
 const LOGOS: Record<string, (props: { className?: string }) => JSX.Element> = {
@@ -93,6 +113,7 @@ export default function TitleBar({
   tabs,
   activeId,
   profiles,
+  activeTheme,
   onSelect,
   onClose,
   onCloseOthers,
@@ -101,7 +122,22 @@ export default function TitleBar({
   onDuplicate,
   onReorder,
   onOpenFolder,
-  onOpenSettings
+  onOpenSettings,
+  onSplitRight,
+  onSplitDown,
+  onCloseCurrentPane,
+  onCopy,
+  onPaste,
+  onFind,
+  onClearTerminal,
+  onZoom,
+  onNextTab,
+  onPrevTab,
+  onToggleTheme,
+  onOpenCommandPalette,
+  onSetTabColor,
+  onShowAbout,
+  onShowShortcuts
 }: Props): JSX.Element {
   const [maximized, setMaximized] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -189,210 +225,248 @@ export default function TitleBar({
   }, [menuOpen])
 
   return (
-    <div className="relative z-10 flex h-9 shrink-0 items-center justify-between border-b border-line bg-titlebar shadow-[0_2px_12px_rgba(0,0,0,0.35)] [-webkit-app-region:drag]">
-      <div className="flex h-full min-w-0 flex-1 items-center gap-3 pl-2.5">
-        <div className="flex shrink-0 items-center gap-2">
-          <img src={iconUrl} alt="" draggable={false} className="h-4 w-4 rounded-[3px]" />
-          <span className="text-xs font-semibold tracking-wide text-muted">AS21 Tershell</span>
+    <div className="relative z-30 flex flex-col shrink-0 border-b border-line bg-titlebar shadow-[0_2px_12px_rgba(0,0,0,0.35)]">
+      {/* Top Tier: App Branding, MenuBar, and Window Controls */}
+      <div className="relative z-30 flex h-8 shrink-0 items-center justify-between border-b border-line/50 px-2.5 [-webkit-app-region:drag]">
+        <div className="flex items-center gap-2.5 [-webkit-app-region:no-drag]">
+          <div className="flex shrink-0 items-center gap-2 pr-1">
+            <img src={iconUrl} alt="" draggable={false} className="h-4 w-4 rounded-[3px]" />
+            <span className="text-xs font-semibold tracking-wide text-muted">AS21 Tershell</span>
+          </div>
+          <MenuBar
+            profiles={profiles}
+            installedCommands={installedCommands}
+            activeTheme={activeTheme}
+            hasActiveTab={tabs.length > 0}
+            onNewTab={onAdd}
+            onOpenFolder={onOpenFolder}
+            onSplitRight={onSplitRight}
+            onSplitDown={onSplitDown}
+            onClosePane={onCloseCurrentPane}
+            onOpenSettings={onOpenSettings}
+            onExitApp={() => window.api.window.close()}
+            onCopy={onCopy}
+            onPaste={onPaste}
+            onFind={onFind}
+            onClearTerminal={onClearTerminal}
+            onZoom={onZoom}
+            onNextTab={onNextTab}
+            onPrevTab={onPrevTab}
+            onToggleTheme={onToggleTheme}
+            onOpenCommandPalette={onOpenCommandPalette}
+            onShowAbout={onShowAbout}
+            onShowShortcuts={onShowShortcuts}
+          />
         </div>
-        <div
-          ref={tabsRef}
-          className="tabs flex h-full min-w-0 shrink items-center gap-1 overflow-x-auto overflow-y-hidden [-webkit-app-region:no-drag]"
-        >
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              draggable={editingTabId !== tab.id}
-              onDragStart={onTabDragStart(tab.id)}
-              onDragOver={onTabDragOver(tab.id)}
-              onDragEnd={() => setDragTabId(null)}
-              onDrop={(e) => {
-                e.preventDefault()
-                setDragTabId(null)
-              }}
-              className={`flex h-[30px] cursor-pointer items-center gap-2 whitespace-nowrap rounded-t-md border-b-2 pl-2.5 pr-2 text-xs ${
-                tab.id === activeId
-                  ? 'border-accent bg-accent-soft text-bright'
-                  : 'border-transparent text-muted hover:bg-hover/60 hover:text-fg'
-              } ${dragTabId === tab.id ? 'opacity-50' : ''}`}
-              onClick={() => onSelect(tab.id)}
-              onDoubleClick={() => startRename(tab)}
-              onContextMenu={(e) => {
-                e.preventDefault()
-                onSelect(tab.id)
-                setTabMenu({ id: tab.id, x: e.clientX, y: e.clientY })
-              }}
-            >
-              <TabIcon logoId={tab.logoId} color={tab.color} />
-              {editingTabId === tab.id ? (
-                <input
-                  ref={editInputRef}
-                  value={editValue}
-                  className="w-[120px] max-w-[160px] bg-transparent text-xs text-bright outline-none"
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => setEditValue(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitRename()
-                    else if (e.key === 'Escape') setEditingTabId(null)
+
+        {/* Window controls only */}
+        <div className="flex h-full shrink-0 items-center [-webkit-app-region:no-drag]">
+          <button
+            className="flex h-full w-10 items-center justify-center text-muted hover:bg-hover hover:text-bright transition-colors"
+            title="Minimize"
+            onClick={() => window.api.window.minimize()}
+          >
+            <MinimizeIcon />
+          </button>
+          <button
+            className="flex h-full w-10 items-center justify-center text-muted hover:bg-hover hover:text-bright transition-colors"
+            title={maximized ? 'Restore' : 'Maximize'}
+            onClick={() => window.api.window.maximize()}
+          >
+            {maximized ? <RestoreIcon /> : <MaximizeIcon />}
+          </button>
+          <button
+            className="flex h-full w-10 items-center justify-center text-muted hover:bg-danger hover:text-white transition-colors"
+            title="Close"
+            onClick={() => window.api.window.close()}
+          >
+            <CloseIcon />
+          </button>
+        </div>
+      </div>
+
+      {/* Bottom Tier: Tabs Strip & New Tab Launcher */}
+      <div className="relative z-20 flex h-[34px] shrink-0 items-center justify-between px-2 bg-surface/40 [-webkit-app-region:drag]">
+        <div className="flex h-full min-w-0 flex-1 items-center gap-1.5 [-webkit-app-region:no-drag]">
+          <div
+            ref={tabsRef}
+            className="tabs flex h-full min-w-0 shrink items-center gap-1 overflow-x-auto overflow-y-hidden py-0.5 [-webkit-app-region:no-drag]"
+          >
+            {tabs.map((tab) => {
+              const isActive = tab.id === activeId
+              return (
+                <div
+                  key={tab.id}
+                  draggable={editingTabId !== tab.id}
+                  onDragStart={onTabDragStart(tab.id)}
+                  onDragOver={onTabDragOver(tab.id)}
+                  onDragEnd={() => setDragTabId(null)}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    setDragTabId(null)
                   }}
-                />
-              ) : (
-                <span className="max-w-[160px] truncate" title={tab.title}>
-                  {tab.title}
-                </span>
-              )}
-              <button
-                className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded hover:bg-hover-strong"
-                title="Close tab"
-                onClick={(e): void => {
-                  e.stopPropagation()
-                  onClose(tab.id)
-                }}
-              >
-                <CloseIcon size={10} />
-              </button>
-            </div>
-          ))}
-        </div>
-        {/* Tab/app actions, kept together and clear of the window controls. */}
-        <div className="flex shrink-0 items-center gap-1">
+                  className={`group flex h-[27px] cursor-pointer items-center gap-2 whitespace-nowrap rounded-md px-2.5 text-xs transition-all select-none [-webkit-app-region:no-drag] ${
+                    isActive
+                      ? 'border border-line/90 bg-hover text-bright font-medium shadow-xs ring-1 ring-accent/25'
+                      : 'border border-transparent text-muted hover:border-line/40 hover:bg-hover/50 hover:text-fg'
+                  } ${dragTabId === tab.id ? 'opacity-40 scale-95' : ''}`}
+                  onMouseDown={(e) => {
+                    if (e.button === 0 && editingTabId !== tab.id) {
+                      onSelect(tab.id)
+                    }
+                  }}
+                  onClick={() => onSelect(tab.id)}
+                  onDoubleClick={() => startRename(tab)}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    onSelect(tab.id)
+                    setTabMenu({ id: tab.id, x: e.clientX, y: e.clientY })
+                  }}
+                >
+                  <TabIcon logoId={tab.logoId} color={tab.customColor || tab.color} />
+                  {editingTabId === tab.id ? (
+                    <input
+                      ref={editInputRef}
+                      value={editValue}
+                      className="w-[120px] max-w-[160px] bg-transparent text-xs text-bright outline-none"
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitRename()
+                        else if (e.key === 'Escape') setEditingTabId(null)
+                      }}
+                    />
+                  ) : (
+                    <span className="max-w-[160px] truncate" title={tab.title}>
+                      {tab.title}
+                    </span>
+                  )}
+                  <button
+                    className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted transition-colors hover:bg-hover-strong hover:text-danger opacity-70 group-hover:opacity-100"
+                    title="Close tab"
+                    onClick={(e): void => {
+                      e.stopPropagation()
+                      onClose(tab.id)
+                    }}
+                  >
+                    <CloseIcon size={10} />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+
           <div className="relative shrink-0 [-webkit-app-region:no-drag]" ref={menuRef}>
             <button
               type="button"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
-              className="flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-accent-soft hover:text-accent"
-              title="New tab"
+              className={`flex h-6 w-6 items-center justify-center rounded-md text-muted transition-all hover:bg-accent-soft hover:text-accent ${
+                menuOpen ? 'bg-accent-soft text-accent ring-1 ring-accent/30' : ''
+              }`}
+              title="New tab / Tools"
               onClick={() => setMenuOpen((v) => !v)}
             >
-              <PlusIcon />
+              <PlusIcon size={12} />
             </button>
-            {menuOpen && (
-              <div
-                ref={menuPopupRef}
-                role="menu"
-                className="scroll-custom absolute left-0 top-full z-10 mt-1 max-h-[70vh] w-max overflow-y-auto rounded-md border border-hover-strong bg-hover shadow-lg"
-              >
-                {profiles.map((profile) => (
-                  <button
-                    key={profile.key}
-                    type="button"
-                    role="menuitem"
-                    className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
-                    onClick={() => {
-                      onAdd(profile.key, { title: profile.name })
-                      setMenuOpen(false)
-                    }}
-                  >
-                    <span
-                      className="h-1.5 w-1.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: profile.color }}
-                    />
-                    {profile.name}
-                  </button>
-                ))}
-                <div className="border-t border-line" />
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
-                  onClick={() => {
-                    onOpenFolder()
-                    setMenuOpen(false)
-                  }}
+            <AnimatePresence>
+              {menuOpen && (
+                <motion.div
+                  ref={menuPopupRef}
+                  role="menu"
+                  variants={dropdownVariants}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  className="scroll-custom absolute left-0 top-full z-50 mt-1 max-h-[70vh] w-max overflow-y-auto rounded-lg border border-line/80 bg-titlebar/95 p-1.5 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.65)] [-webkit-app-region:no-drag]"
                 >
-                  <FolderIcon size={11} className="shrink-0 text-muted" />
-                  Open folder…
-                </button>
-                <div className="flex items-center gap-1.5 border-t border-line px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted">
-                  Tools
-                  {installedCommands === null && <SpinnerIcon size={10} />}
-                </div>
-                {TOOLS.map((tool) => {
-                  const checking = installedCommands === null
-                  const installed = !checking && installedCommands.includes(tool.checkCommand)
-                  const LogoIcon = toolLogo(tool.id)
-                  return (
+                  {profiles.map((profile) => (
                     <button
-                      key={tool.id}
+                      key={profile.key}
                       type="button"
                       role="menuitem"
-                      className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
+                      className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs text-fg transition-colors hover:bg-accent-soft hover:text-accent"
                       onClick={() => {
-                        if (installed) {
-                          onAdd('powershell', {
-                            initialCommand: tool.checkCommand,
-                            title: tool.name,
-                            logoId: tool.id
-                          })
-                        } else {
-                          onAdd('powershell', {
-                            initialCommand: tool.installCommand,
-                            title: `Install ${tool.name}`,
-                            logoId: tool.id
-                          })
-                        }
+                        onAdd(profile.key, { title: profile.name })
                         setMenuOpen(false)
                       }}
                     >
-                      <LogoIcon
-                        className={`h-3 w-3 shrink-0 ${
-                          checking ? 'animate-pulse text-hover-strong' : installed ? 'text-accent' : 'text-hover-strong'
-                        }`}
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full shadow-xs"
+                        style={{ backgroundColor: profile.color }}
                       />
-                      <span className={`flex-1 ${checking ? 'animate-pulse' : ''}`}>{tool.name}</span>
-                      {checking ? (
-                        <SpinnerIcon size={10} className="text-muted" />
-                      ) : (
-                        !installed && (
-                          <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted">
-                            <DownloadIcon size={10} />
-                            Install
-                          </span>
-                        )
-                      )}
+                      <span className="font-medium">{profile.name}</span>
                     </button>
-                  )
-                })}
-              </div>
-            )}
+                  ))}
+                  <div className="my-1 border-t border-line/60" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs text-fg transition-colors hover:bg-accent-soft hover:text-accent"
+                    onClick={() => {
+                      onOpenFolder()
+                      setMenuOpen(false)
+                    }}
+                  >
+                    <FolderIcon size={11} className="shrink-0 text-muted" />
+                    <span>Open folder…</span>
+                  </button>
+                  <div className="flex items-center gap-1.5 border-t border-line/60 px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted">
+                    Tools
+                    {installedCommands === null && <SpinnerIcon size={10} />}
+                  </div>
+                  {TOOLS.map((tool) => {
+                    const checking = installedCommands === null
+                    const installed = !checking && installedCommands.includes(tool.checkCommand)
+                    const LogoIcon = toolLogo(tool.id)
+                    return (
+                      <button
+                        key={tool.id}
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs text-fg transition-colors hover:bg-accent-soft hover:text-accent"
+                        onClick={() => {
+                          if (installed) {
+                            onAdd('powershell', {
+                              initialCommand: tool.checkCommand,
+                              title: tool.name,
+                              logoId: tool.id
+                            })
+                          } else {
+                            onAdd('powershell', {
+                              initialCommand: tool.installCommand,
+                              title: `Install ${tool.name}`,
+                              logoId: tool.id
+                            })
+                          }
+                          setMenuOpen(false)
+                        }}
+                      >
+                        <LogoIcon
+                          className={`h-3.5 w-3.5 shrink-0 ${
+                            checking ? 'animate-pulse text-hover-strong' : installed ? 'text-accent' : 'text-hover-strong'
+                          }`}
+                        />
+                        <span className={`flex-1 ${checking ? 'animate-pulse' : ''}`}>{tool.name}</span>
+                        {checking ? (
+                          <SpinnerIcon size={10} className="text-muted" />
+                        ) : (
+                          !installed && (
+                            <span className="flex items-center gap-1 rounded bg-surface/60 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted">
+                              <DownloadIcon size={9} />
+                              Install
+                            </span>
+                          )
+                        )}
+                      </button>
+                    )
+                  })}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-          <button
-            type="button"
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted hover:bg-accent-soft hover:text-accent [-webkit-app-region:no-drag]"
-            title="Settings"
-            onClick={onOpenSettings}
-          >
-            <GearIcon />
-          </button>
         </div>
-      </div>
-      {/* Window controls only — Settings lives with the tab actions on the
-          left, since it's an app action, not window chrome, and sitting
-          next to Close made it easy to hit by mistake. */}
-      <div className="flex h-full shrink-0 [-webkit-app-region:no-drag]">
-        <button
-          className="flex h-full w-11 items-center justify-center text-muted hover:bg-hover hover:text-bright"
-          title="Minimize"
-          onClick={() => window.api.window.minimize()}
-        >
-          <MinimizeIcon />
-        </button>
-        <button
-          className="flex h-full w-11 items-center justify-center text-muted hover:bg-hover hover:text-bright"
-          title={maximized ? 'Restore' : 'Maximize'}
-          onClick={() => window.api.window.maximize()}
-        >
-          {maximized ? <RestoreIcon /> : <MaximizeIcon />}
-        </button>
-        <button
-          className="flex h-full w-11 items-center justify-center text-muted hover:bg-danger hover:text-white"
-          title="Close"
-          onClick={() => window.api.window.close()}
-        >
-          <CloseIcon />
-        </button>
       </div>
 
       {tabMenu && (
@@ -408,6 +482,9 @@ export default function TitleBar({
           onDuplicate={() => {
             onDuplicate(tabMenu.id)
             setTabMenu(null)
+          }}
+          onSetColor={(color) => {
+            onSetTabColor?.(tabMenu.id, color)
           }}
           onClose={() => {
             onClose(tabMenu.id)

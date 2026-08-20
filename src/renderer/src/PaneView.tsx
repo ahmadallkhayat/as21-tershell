@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from 'react'
+import { Fragment, useLayoutEffect, useRef } from 'react'
 import type { PaneNode } from './paneTree'
 import { slotStore } from './paneSlots'
 
@@ -16,6 +16,8 @@ export interface PaneActions {
   onPrevTab: () => void
   onSelectTabIndex: (index: number) => void
   onZoom: (delta: number | 'reset') => void
+  onOpenSettings?: () => void
+  onShowShortcuts?: () => void
 }
 
 interface Props {
@@ -40,8 +42,8 @@ function Divider({
     <div
       className={
         direction === 'row'
-          ? 'w-1 shrink-0 cursor-col-resize bg-line hover:bg-accent'
-          : 'h-1 shrink-0 cursor-row-resize bg-line hover:bg-accent'
+          ? 'w-1 shrink-0 cursor-col-resize bg-line/80 transition-colors hover:bg-accent hover:shadow-[0_0_8px_var(--color-accent)]'
+          : 'h-1 shrink-0 cursor-row-resize bg-line/80 transition-colors hover:bg-accent hover:shadow-[0_0_8px_var(--color-accent)]'
       }
       onPointerDown={(e) => {
         draggingRef.current = true
@@ -97,7 +99,7 @@ function PaneSlot({
 }): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const host = hostRef.current
     if (!host) return
     const node = slotStore.acquire(paneId)
@@ -108,7 +110,9 @@ function PaneSlot({
   return (
     <div
       ref={hostRef}
-      className={`relative min-h-0 min-w-0 flex-1 ${focused ? 'ring-1 ring-inset ring-accent' : ''}`}
+      className={`relative min-h-0 min-w-0 flex-1 transition-all ${
+        focused ? 'ring-1 ring-inset ring-accent shadow-[inset_0_0_0_1px_var(--color-accent)]' : ''
+      }`}
       onMouseDown={onFocus}
     />
   )

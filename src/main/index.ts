@@ -189,6 +189,31 @@ function registerPtyHandlers(): void {
       : await dialog.showOpenDialog(options)
     return result.canceled ? null : (result.filePaths[0] ?? null)
   })
+
+  ipcMain.handle('dialog:saveFile', async (event, content: string, defaultPath?: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options = {
+      title: 'Export Terminal Log',
+      defaultPath: defaultPath || 'terminal-output.log',
+      filters: [
+        { name: 'Log files (*.log, *.txt)', extensions: ['log', 'txt'] },
+        { name: 'All Files (*.*)', extensions: ['*'] }
+      ]
+    }
+    const result = win
+      ? await dialog.showSaveDialog(win, options)
+      : await dialog.showSaveDialog(options)
+    if (result.canceled || !result.filePath) return false
+    const { promises: fsPromises } = await import('fs')
+    await fsPromises.writeFile(result.filePath, content, 'utf8')
+    return true
+  })
+
+  ipcMain.handle('shell:openExternal', async (_event, url: string) => {
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('mailto:')) {
+      await shell.openExternal(url)
+    }
+  })
 }
 
 /** A renderer reload (dev HMR, Ctrl+R, or a crash) discards all React state

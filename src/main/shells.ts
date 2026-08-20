@@ -108,68 +108,79 @@ function detectGitBash(): ShellProfile | null {
  * raw buffer rather than letting execFile hand back a mojibake string. */
 function detectWslDistros(): Promise<ShellProfile[]> {
   return new Promise((resolve) => {
+    const systemRoot = process.env.SystemRoot || 'C:\\Windows'
+    const wslExe = join(systemRoot, 'System32', 'wsl.exe')
+    if (!existsSync(wslExe)) {
+      resolve([])
+      return
+    }
+
     execFile(
-      'wsl.exe',
+      wslExe,
       ['--list', '--quiet'],
-      { encoding: 'buffer', timeout: 5000, windowsHide: true },
+      { encoding: 'buffer', timeout: 1500, windowsHide: true },
       (err, stdout) => {
         if (err || !stdout || stdout.length === 0) {
           resolve([])
           return
         }
-        const names = stdout
-          .toString('utf16le')
-          .replace(/\u0000/g, '')
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean)
+        try {
+          const names = stdout
+            .toString('utf16le')
+            .replace(/\u0000/g, '')
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean)
 
-        resolve(
-          names.map((name) => ({
-            key: `wsl-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-            name: `WSL: ${name}`,
-            path: 'wsl.exe',
-            args: ['--distribution', name],
-            family: 'bash' as const,
-            color: WSL_COLOR,
-            // Most distros' default bash/zsh profiles emit OSC 7.
-            supportsCwdTracking: true
-          }))
-        )
+          resolve(
+            names.map((name) => ({
+              key: `wsl-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+              name: `WSL: ${name}`,
+              path: 'wsl.exe',
+              args: ['--distribution', name],
+              family: 'bash' as const,
+              color: WSL_COLOR,
+              // Most distros' default bash/zsh profiles emit OSC 7.
+              supportsCwdTracking: true
+            }))
+          )
+        } catch {
+          resolve([])
+        }
       }
     )
   })
 }
 
+function getLocalProfiles(): ShellProfile[] {
+  return [
+    detectPowerShell(),
+    detectPwsh(),
+    detectCmd(),
+    detectGitBash()
+  ].filter((p): p is ShellProfile => p !== null)
+}
+
 let cache: ShellProfile[] | null = null
-let pending: Promise<ShellProfile[]> | null = null
+let pendingWsl: Promise<void> | null = null
 
-/** Discovers the shells actually installed on this machine. Cached, since
- * probing the filesystem and shelling out to wsl.exe is not free and the
- * set of installed shells doesn't change mid-session in practice. */
+/** Discovers the shells actually installed on this machine. Local shells
+ * (PowerShell, Cmd, Git Bash) are returned immediately without blocking,
+ * while WSL distros are probed asynchronously in the background. */
 export function getShellProfiles(force = false): Promise<ShellProfile[]> {
-  if (force) {
-    cache = null
-    pending = null
+  if (force || !cache) {
+    cache = getLocalProfiles()
+    pendingWsl = detectWslDistros().then((wsl) => {
+      if (wsl.length > 0) {
+        const local = getLocalProfiles()
+        cache = [...local, ...wsl]
+      }
+    }).catch(() => {
+      // Ignore WSL detection errors
+    })
   }
-  if (cache) return Promise.resolve(cache)
-  if (pending) return pending
 
-  pending = (async () => {
-    const wsl = await detectWslDistros()
-    const profiles = [
-      detectPowerShell(),
-      detectPwsh(),
-      detectCmd(),
-      detectGitBash(),
-      ...wsl
-    ].filter((p): p is ShellProfile => p !== null)
-
-    cache = profiles
-    return profiles
-  })()
-
-  return pending
+  return Promise.resolve(cache)
 }
 
 export function findProfile(profiles: ShellProfile[], key: string): ShellProfile | undefined {

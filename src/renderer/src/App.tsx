@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AnimatePresence } from 'framer-motion'
 import TitleBar from './TitleBar'
 import PaneView, { type PaneActions } from './PaneView'
 import TerminalHost from './TerminalHost'
 import SettingsPanel from './SettingsPanel'
 import ConfirmCloseDialog from './ConfirmCloseDialog'
-import { busyProcessName } from './paneProcess'
+import AboutDialog from './AboutDialog'
+import ShortcutsDialog from './ShortcutsDialog'
+import CommandPalette from './CommandPalette'
+import { busyProcessName, getPanePty } from './paneProcess'
 import { getPaneCwd } from './paneCwd'
 import { slotStore } from './paneSlots'
-import { setActiveTabPanes, setFocusPaneHandler } from './paneSearch'
+import { openPaneSearch, setActiveTabPanes, setFocusPaneHandler } from './paneSearch'
 import { clearSession, loadSession, saveSession } from './session'
 import {
   applyAccentColor,
@@ -17,7 +21,8 @@ import {
   resolveProfiles,
   saveSettings,
   type Settings,
-  type ShellProfile
+  type ShellProfile,
+  type ThemeMode
 } from './settings'
 import {
   type PaneNode,
@@ -37,7 +42,29 @@ interface Tab {
   id: string
   root: PaneNode
   focusedPaneId: string
+  customColor?: string
 }
+
+const DEFAULT_LOCAL_PROFILES: ShellProfile[] = [
+  {
+    key: 'powershell',
+    name: 'Windows PowerShell',
+    path: 'powershell.exe',
+    args: ['-NoLogo'],
+    family: 'powershell',
+    color: '#5b9dff',
+    supportsCwdTracking: true
+  },
+  {
+    key: 'cmd',
+    name: 'Command Prompt',
+    path: 'cmd.exe',
+    args: [],
+    family: 'cmd',
+    color: '#ffb454',
+    supportsCwdTracking: false
+  }
+]
 
 export default function App(): JSX.Element {
   const [settings, setSettings] = useState<Settings>(() => loadSettings())
@@ -46,23 +73,46 @@ export default function App(): JSX.Element {
   // session before it has been read back.
   const [restored] = useState(() => (settings.restoreSession ? loadSession() : null))
 
-  const [profiles, setProfiles] = useState<ShellProfile[]>([])
-  // Terminals must not spawn until profiles are known. A restored session
-  // renders its panes on the very first frame, and resolving a pane's
-  // profile before the list arrives would silently fall back to the wrong
-  // shell — badly wrong for a user-defined profile, which the main process
-  // cannot look up by key at all.
-  const [profilesLoaded, setProfilesLoaded] = useState(false)
+  const [profiles, setProfiles] = useState<ShellProfile[]>(DEFAULT_LOCAL_PROFILES)
   const [tabs, setTabs] = useState<Tab[]>(() => {
     const initial = restored?.tabs ?? []
     reserveTabIds(initial.map((t) => t.id))
-    return initial
+    if (initial.length > 0) return initial
+    const key = settings.defaultShell || 'powershell'
+    const name = key === 'cmd' ? 'Command Prompt' : 'Windows PowerShell'
+    const leaf = createLeaf(key, { title: name })
+    const id = nextTabId()
+    return [{ id, root: leaf, focusedPaneId: leaf.id }]
   })
-  const [activeId, setActiveId] = useState<string>(() => restored?.activeId ?? '')
+  const [activeId, setActiveId] = useState<string>(() => restored?.activeId ?? (tabs[0]?.id ?? ''))
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [confirmClose, setConfirmClose] = useState<{ processNames: string[]; onConfirm: () => void } | null>(
     null
   )
+
+  const setTabColor = useCallback((tabId: string, color?: string) => {
+    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, customColor: color } : t)))
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'p') || e.key === 'F2') {
+        e.preventDefault()
+        setCommandPaletteOpen((v) => !v)
+      } else if (e.ctrlKey && e.key === ',') {
+        e.preventDefault()
+        setSettingsOpen((v) => !v)
+      } else if (e.key === 'F1' || (e.ctrlKey && e.shiftKey && (e.key === '?' || e.key === '/'))) {
+        e.preventDefault()
+        setShortcutsOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
+  }, [])
 
   /** Detected profiles plus the user's own, with per-profile starting
    * directory overrides folded in. */
@@ -98,15 +148,16 @@ export default function App(): JSX.Element {
 
   const addTab = useCallback(
     (
-      shellKey: string,
+      shellKey?: string,
       options: { initialCommand?: string; title?: string; logoId?: string; cwd?: string } = {}
     ) => {
-      const leaf = createLeaf(shellKey, options)
+      const key = shellKey || settings.defaultShell || allProfiles[0]?.key || 'powershell'
+      const leaf = createLeaf(key, options)
       const id = nextTabId()
       setTabs((prev) => [...prev, { id, root: leaf, focusedPaneId: leaf.id }])
       setActiveId(id)
     },
-    []
+    [settings.defaultShell, allProfiles]
   )
 
   const initialized = useRef(false)
@@ -115,22 +166,10 @@ export default function App(): JSX.Element {
     if (initialized.current) return
     initialized.current = true
     window.api.listProfiles().then((list) => {
-      setProfiles(list)
-      setProfilesLoaded(true)
-      // Only open a starting tab when nothing was restored.
-      setTabs((prev) => {
-        if (prev.length > 0) return prev
-        const key = list.some((p) => p.key === settings.defaultShell)
-          ? settings.defaultShell
-          : (list[0]?.key ?? 'powershell')
-        const name = list.find((p) => p.key === key)?.name ?? 'Terminal'
-        const leaf = createLeaf(key, { title: name })
-        const id = nextTabId()
-        setActiveId(id)
-        return [{ id, root: leaf, focusedPaneId: leaf.id }]
-      })
+      if (list && list.length > 0) {
+        setProfiles(list)
+      }
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Persist the session (debounced — tab state churns on every resize
@@ -454,8 +493,59 @@ export default function App(): JSX.Element {
     onNextTab: selectNextTab,
     onPrevTab: selectPrevTab,
     onSelectTabIndex: selectTabByIndex,
-    onZoom: zoomFont
+    onZoom: zoomFont,
+    onOpenSettings: () => setSettingsOpen(true),
+    onShowShortcuts: () => setShortcutsOpen(true)
   })
+
+  const splitCurrentPane = useCallback(
+    (direction: 'row' | 'column') => {
+      const tab = tabs.find((t) => t.id === activeId)
+      if (tab) splitPane(tab.id, tab.focusedPaneId, direction)
+    },
+    [tabs, activeId, splitPane]
+  )
+
+  const closeCurrentPane = useCallback(() => {
+    const tab = tabs.find((t) => t.id === activeId)
+    if (tab) requestClosePane(tab.id, tab.focusedPaneId)
+  }, [tabs, activeId, requestClosePane])
+
+  const copySelection = useCallback(() => {
+    const selection = window.getSelection()?.toString()
+    if (selection) {
+      navigator.clipboard.writeText(selection)
+    }
+  }, [])
+
+  const pasteToActive = useCallback(() => {
+    const tab = tabs.find((t) => t.id === activeId)
+    if (!tab) return
+    const ptyId = getPanePty(tab.focusedPaneId)
+    if (!ptyId) return
+    navigator.clipboard.readText().then((text) => {
+      if (text) window.api.write(ptyId, text)
+    })
+  }, [tabs, activeId])
+
+  const findInActive = useCallback(() => {
+    const tab = tabs.find((t) => t.id === activeId)
+    if (tab) openPaneSearch(tab.focusedPaneId)
+  }, [tabs, activeId])
+
+  const clearActiveTerminal = useCallback(() => {
+    const tab = tabs.find((t) => t.id === activeId)
+    if (!tab) return
+    const ptyId = getPanePty(tab.focusedPaneId)
+    if (ptyId) window.api.write(ptyId, '\x0c')
+  }, [tabs, activeId])
+
+  const toggleThemeMode = useCallback(
+    (mode: ThemeMode) => {
+      updateSettings({ ...settings, themeMode: mode })
+    },
+    [settings, updateSettings]
+  )
 
   const titleBarTabs = tabs.map((tab) => {
     const focused = findLeaf(tab.root, tab.focusedPaneId)
@@ -465,16 +555,34 @@ export default function App(): JSX.Element {
       shellKey,
       title: focused?.title ?? 'Terminal',
       logoId: focused?.logoId,
-      color: profileFor(shellKey)?.color
+      color: profileFor(shellKey)?.color,
+      customColor: tab.customColor
     }
   })
 
+  const paletteOpenTabs = useMemo(
+    () =>
+      tabs.map((tab, index) => {
+        const focused = findLeaf(tab.root, tab.focusedPaneId)
+        return {
+          id: tab.id,
+          title: focused?.title ?? 'Terminal',
+          index
+        }
+      }),
+    [tabs]
+  )
+
   return (
-    <div className="flex h-screen flex-col">
+    <div
+      className="flex h-screen flex-col transition-opacity"
+      style={{ opacity: settings.backgroundOpacity ?? 1 }}
+    >
       <TitleBar
         tabs={titleBarTabs}
         activeId={activeId}
         profiles={allProfiles}
+        activeTheme={settings.themeMode}
         onSelect={setActiveId}
         onClose={requestCloseTab}
         onCloseOthers={requestCloseOtherTabs}
@@ -484,6 +592,21 @@ export default function App(): JSX.Element {
         onReorder={moveTab}
         onOpenFolder={openFolderInNewTab}
         onOpenSettings={() => setSettingsOpen(true)}
+        onSplitRight={() => splitCurrentPane('row')}
+        onSplitDown={() => splitCurrentPane('column')}
+        onCloseCurrentPane={closeCurrentPane}
+        onCopy={copySelection}
+        onPaste={pasteToActive}
+        onFind={findInActive}
+        onClearTerminal={clearActiveTerminal}
+        onZoom={zoomFont}
+        onNextTab={selectNextTab}
+        onPrevTab={selectPrevTab}
+        onToggleTheme={toggleThemeMode}
+        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+        onSetTabColor={setTabColor}
+        onShowAbout={() => setAboutOpen(true)}
+        onShowShortcuts={() => setShortcutsOpen(true)}
       />
       <div className="relative min-h-0 flex-1">
         {tabs.map((tab) => {
@@ -500,7 +623,7 @@ export default function App(): JSX.Element {
             No terminal sessions. Click + to start one.
           </div>
         )}
-        {profilesLoaded && tabs.flatMap((tab) => {
+        {tabs.flatMap((tab) => {
           const actions = makeActions(tab.id)
           const active = tab.id === activeId
           const isSplit = countLeaves(tab.root) > 1
@@ -518,21 +641,53 @@ export default function App(): JSX.Element {
           ))
         })}
       </div>
-      {settingsOpen && (
-        <SettingsPanel
-          settings={settings}
-          profiles={allProfiles}
-          onChange={updateSettings}
-          onClose={() => setSettingsOpen(false)}
-        />
-      )}
-      {confirmClose && (
-        <ConfirmCloseDialog
-          processNames={confirmClose.processNames}
-          onConfirm={confirmClose.onConfirm}
-          onCancel={() => setConfirmClose(null)}
-        />
-      )}
+      <AnimatePresence>
+        {commandPaletteOpen && (
+          <CommandPalette
+            profiles={allProfiles}
+            openTabs={paletteOpenTabs}
+            activeTheme={settings.themeMode}
+            onSelectTab={setActiveId}
+            onNewTab={addTab}
+            onSplitRight={() => splitCurrentPane('row')}
+            onSplitDown={() => splitCurrentPane('column')}
+            onCloseCurrentPane={closeCurrentPane}
+            onFind={findInActive}
+            onClearTerminal={clearActiveTerminal}
+            onZoom={zoomFont}
+            onToggleTheme={toggleThemeMode}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onShowShortcuts={() => setShortcutsOpen(true)}
+            onShowAbout={() => setAboutOpen(true)}
+            onClose={() => setCommandPaletteOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {settingsOpen && (
+          <SettingsPanel
+            settings={settings}
+            profiles={allProfiles}
+            onChange={updateSettings}
+            onClose={() => setSettingsOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {confirmClose && (
+          <ConfirmCloseDialog
+            processNames={confirmClose.processNames}
+            onConfirm={confirmClose.onConfirm}
+            onCancel={() => setConfirmClose(null)}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
+      </AnimatePresence>
     </div>
   )
 }

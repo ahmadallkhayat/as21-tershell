@@ -59,6 +59,8 @@ export default function TerminalHost({
       onSplitDown={() => actions.onSplitDown(leaf.id)}
       onFocusAdjacent={actions.onFocusAdjacent}
       onZoom={actions.onZoom}
+      onOpenSettings={actions.onOpenSettings}
+      onShowShortcuts={actions.onShowShortcuts}
     />,
     slot
   )

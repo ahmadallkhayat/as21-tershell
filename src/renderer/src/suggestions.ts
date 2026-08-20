@@ -54,10 +54,85 @@ export function commitToHistory(shellKey: string, line: string): string[] {
   return next
 }
 
+const DEFAULT_SHELL_COMMANDS: Record<string, string[]> = {
+  powershell: [
+    'Get-ChildItem',
+    'Get-Process',
+    'Get-Service',
+    'Set-Location',
+    'Get-Content',
+    'Clear-Host',
+    'cls',
+    'ls',
+    'dir',
+    'cd',
+    'cat',
+    'pwd',
+    'mkdir',
+    'rm',
+    'echo',
+    'curl',
+    'node',
+    'npm',
+    'pnpm',
+    'yarn',
+    'git',
+    'docker',
+    'python',
+    'cargo',
+    'wsl',
+    'ssh',
+    'code'
+  ],
+  cmd: [
+    'dir',
+    'cd',
+    'cls',
+    'mkdir',
+    'rmdir',
+    'copy',
+    'move',
+    'del',
+    'type',
+    'echo',
+    'ipconfig',
+    'ping',
+    'tasklist',
+    'taskkill',
+    'git',
+    'npm',
+    'node',
+    'python',
+    'docker'
+  ],
+  bash: [
+    'ls -la',
+    'cd',
+    'pwd',
+    'mkdir -p',
+    'rm -rf',
+    'cat',
+    'clear',
+    'grep',
+    'curl',
+    'ssh',
+    'git',
+    'npm',
+    'docker',
+    'python3'
+  ]
+}
+
 export function getSuggestions(shellKey: string, line: string): string[] {
   const query = line.trim().toLowerCase()
   if (!query) return []
   const history = loadHistory(shellKey)
+
+  const shellFamily = shellKey.includes('cmd')
+    ? 'cmd'
+    : shellKey.includes('bash') || shellKey.includes('wsl') || shellKey.includes('ubuntu') || shellKey.includes('debian')
+      ? 'bash'
+      : 'powershell'
 
   const seen = new Set<string>()
   const results: string[] = []
@@ -73,6 +148,7 @@ export function getSuggestions(shellKey: string, line: string): string[] {
 
   add(history)
   add(COMMON_SNIPPETS)
+  add(DEFAULT_SHELL_COMMANDS[shellFamily] ?? DEFAULT_SHELL_COMMANDS.powershell)
   add(systemCommands)
 
   return results.slice(0, 8)
