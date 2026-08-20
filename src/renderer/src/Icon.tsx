@@ -113,6 +113,14 @@ export function ChevronDownIcon(props: IconProps): JSX.Element {
   )
 }
 
+export function FolderIcon(props: IconProps): JSX.Element {
+  return (
+    <Icon {...props}>
+      <path d="M2 4.5A1 1 0 0 1 3 3.5H6.5L8 5.5H13A1 1 0 0 1 14 6.5V12A1 1 0 0 1 13 13H3A1 1 0 0 1 2 12Z" />
+    </Icon>
+  )
+}
+
 export function SpinnerIcon({ className, size = DEFAULT_SIZE }: IconProps): JSX.Element {
   return (
     <Icon size={size} className={`animate-spin ${className ?? ''}`}>

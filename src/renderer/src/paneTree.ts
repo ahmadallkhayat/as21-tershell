@@ -5,6 +5,9 @@ export interface LeafPane {
   initialCommand?: string
   title: string
   logoId?: string
+  /** Directory this pane's shell starts in. Undefined defers to the
+   * profile's configured start directory (then the user's home). */
+  cwd?: string
 }
 
 export interface SplitPane {
@@ -22,14 +25,54 @@ export function nextPaneId(): string {
   return `pane-${++paneSeq}`
 }
 
-export function createLeaf(shellKey: string, initialCommand?: string, title?: string, logoId?: string): LeafPane {
+/** Pushes the id counter past every id in a restored tree. Without this a
+ * session restored with `pane-7` would hand out `pane-1`, `pane-2`, ...
+ * again for new panes and eventually collide with a live one — and pane
+ * ids key the slot/pty/search registries, so a collision would cross two
+ * panes' wires. */
+export function reservePaneIds(nodes: PaneNode[]): void {
+  let max = paneSeq
+  const walk = (node: PaneNode): void => {
+    if (node.type === 'leaf') {
+      const n = Number(/^pane-(\d+)$/.exec(node.id)?.[1])
+      if (Number.isFinite(n) && n > max) max = n
+      return
+    }
+    node.children.forEach(walk)
+  }
+  nodes.forEach(walk)
+  paneSeq = max
+}
+
+let tabSeq = 0
+export function nextTabId(): string {
+  return `tab-${++tabSeq}`
+}
+
+/** Same collision guard as reservePaneIds, for restored tab ids. */
+export function reserveTabIds(ids: string[]): void {
+  for (const id of ids) {
+    const n = Number(/^tab-(\d+)$/.exec(id)?.[1])
+    if (Number.isFinite(n) && n > tabSeq) tabSeq = n
+  }
+}
+
+export interface CreateLeafOptions {
+  initialCommand?: string
+  title?: string
+  logoId?: string
+  cwd?: string
+}
+
+export function createLeaf(shellKey: string, options: CreateLeafOptions = {}): LeafPane {
   return {
     type: 'leaf',
     id: nextPaneId(),
     shellKey,
-    initialCommand,
-    title: title ?? (shellKey === 'cmd' ? 'Command Prompt' : 'PowerShell'),
-    logoId
+    initialCommand: options.initialCommand,
+    title: options.title ?? 'Terminal',
+    logoId: options.logoId,
+    cwd: options.cwd
   }
 }
 

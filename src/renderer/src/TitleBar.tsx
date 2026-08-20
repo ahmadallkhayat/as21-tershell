@@ -14,6 +14,7 @@ import {
 import {
   CloseIcon,
   DownloadIcon,
+  FolderIcon,
   GearIcon,
   MaximizeIcon,
   MinimizeIcon,
@@ -23,6 +24,8 @@ import {
 } from './Icon'
 import { useClampToViewport } from './useClampToViewport'
 import { useDragScroll } from './useDragScroll'
+import TabContextMenu from './TabContextMenu'
+import type { ShellProfile } from './settings'
 import iconUrl from '../../../resources/icon.png'
 
 interface Tab {
@@ -30,21 +33,29 @@ interface Tab {
   shellKey: string
   title: string
   logoId?: string
+  /** The shell profile's color, for the tab's dot. */
+  color?: string
 }
 
-interface ShellOption {
-  key: string
-  name: string
+export interface AddTabOptions {
+  initialCommand?: string
+  title?: string
+  logoId?: string
+  cwd?: string
 }
 
 interface Props {
   tabs: Tab[]
   activeId: string
-  shells: ShellOption[]
+  profiles: ShellProfile[]
   onSelect: (id: string) => void
   onClose: (id: string) => void
-  onAdd: (shellKey: string, initialCommand?: string, title?: string, logoId?: string) => void
+  onCloseOthers: (id: string) => void
+  onAdd: (shellKey: string, options?: AddTabOptions) => void
   onRename: (id: string, title: string) => void
+  onDuplicate: (id: string) => void
+  onReorder: (draggedId: string, targetId: string) => void
+  onOpenFolder: () => void
   onOpenSettings: () => void
 }
 
@@ -63,31 +74,33 @@ function toolLogo(id: string): (props: { className?: string }) => JSX.Element {
   return LOGOS[id] ?? ToolMonogramLogo
 }
 
-const DEFAULT_SHELLS: ShellOption[] = [
-  { key: 'powershell', name: 'PowerShell' },
-  { key: 'cmd', name: 'Command Prompt' }
-]
+const FALLBACK_DOT_COLOR = '#8b90a8'
 
-function shellDotClass(shellKey: string): string {
-  return shellKey === 'cmd' ? 'bg-cmd' : 'bg-powershell'
-}
-
-function TabIcon({ logoId, shellKey }: { logoId?: string; shellKey: string }): JSX.Element {
+function TabIcon({ logoId, color }: { logoId?: string; color?: string }): JSX.Element {
   if (logoId) {
     const LogoIcon = toolLogo(logoId)
     return <LogoIcon className="h-3 w-3 shrink-0" />
   }
-  return <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${shellDotClass(shellKey)}`} />
+  return (
+    <span
+      className="h-1.5 w-1.5 shrink-0 rounded-full"
+      style={{ backgroundColor: color ?? FALLBACK_DOT_COLOR }}
+    />
+  )
 }
 
 export default function TitleBar({
   tabs,
   activeId,
-  shells,
+  profiles,
   onSelect,
   onClose,
+  onCloseOthers,
   onAdd,
   onRename,
+  onDuplicate,
+  onReorder,
+  onOpenFolder,
   onOpenSettings
 }: Props): JSX.Element {
   const [maximized, setMaximized] = useState(false)
@@ -95,6 +108,8 @@ export default function TitleBar({
   const [installedCommands, setInstalledCommands] = useState<string[] | null>(null)
   const [editingTabId, setEditingTabId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
+  const [tabMenu, setTabMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [dragTabId, setDragTabId] = useState<string | null>(null)
   const tabsRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const menuPopupRef = useRef<HTMLDivElement>(null)
@@ -117,6 +132,24 @@ export default function TitleBar({
       if (trimmed) onRename(editingTabId, trimmed)
     }
     setEditingTabId(null)
+  }
+
+  // HTML5 drag-and-drop rather than pointer events, specifically so it
+  // doesn't fight useDragScroll: a native dragstart suppresses the
+  // subsequent pointer events the strip-panning hook listens for, so
+  // dragging a tab reorders and dragging empty strip space still pans.
+  const onTabDragStart = (id: string) => (e: React.DragEvent): void => {
+    setDragTabId(id)
+    e.dataTransfer.effectAllowed = 'move'
+    // Firefox/Chromium require data to be set for a drag to actually start.
+    e.dataTransfer.setData('text/plain', id)
+  }
+
+  const onTabDragOver = (id: string) => (e: React.DragEvent): void => {
+    if (!dragTabId || dragTabId === id) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    onReorder(dragTabId, id)
   }
 
   useClampToViewport(menuPopupRef, menuOpen, [installedCommands])
@@ -155,8 +188,6 @@ export default function TitleBar({
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [menuOpen])
 
-  const shellOptions = shells.length > 0 ? shells : DEFAULT_SHELLS
-
   return (
     <div className="relative z-10 flex h-9 shrink-0 items-center justify-between border-b border-line bg-titlebar shadow-[0_2px_12px_rgba(0,0,0,0.35)] [-webkit-app-region:drag]">
       <div className="flex h-full min-w-0 flex-1 items-center gap-3 pl-2.5">
@@ -171,15 +202,28 @@ export default function TitleBar({
           {tabs.map((tab) => (
             <div
               key={tab.id}
+              draggable={editingTabId !== tab.id}
+              onDragStart={onTabDragStart(tab.id)}
+              onDragOver={onTabDragOver(tab.id)}
+              onDragEnd={() => setDragTabId(null)}
+              onDrop={(e) => {
+                e.preventDefault()
+                setDragTabId(null)
+              }}
               className={`flex h-[30px] cursor-pointer items-center gap-2 whitespace-nowrap rounded-t-md border-b-2 pl-2.5 pr-2 text-xs ${
                 tab.id === activeId
                   ? 'border-accent bg-accent-soft text-bright'
                   : 'border-transparent text-muted hover:bg-hover/60 hover:text-fg'
-              }`}
+              } ${dragTabId === tab.id ? 'opacity-50' : ''}`}
               onClick={() => onSelect(tab.id)}
               onDoubleClick={() => startRename(tab)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                onSelect(tab.id)
+                setTabMenu({ id: tab.id, x: e.clientX, y: e.clientY })
+              }}
             >
-              <TabIcon logoId={tab.logoId} shellKey={tab.shellKey} />
+              <TabIcon logoId={tab.logoId} color={tab.color} />
               {editingTabId === tab.id ? (
                 <input
                   ref={editInputRef}
@@ -228,21 +272,37 @@ export default function TitleBar({
               role="menu"
               className="absolute left-0 top-full z-10 mt-1 w-max overflow-hidden rounded-md border border-hover-strong bg-hover shadow-lg"
             >
-              {shellOptions.map((s) => (
+              {profiles.map((profile) => (
                 <button
-                  key={s.key}
+                  key={profile.key}
                   type="button"
                   role="menuitem"
                   className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
                   onClick={() => {
-                    onAdd(s.key)
+                    onAdd(profile.key, { title: profile.name })
                     setMenuOpen(false)
                   }}
                 >
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${shellDotClass(s.key)}`} />
-                  {s.name}
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: profile.color }}
+                  />
+                  {profile.name}
                 </button>
               ))}
+              <div className="border-t border-line" />
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
+                onClick={() => {
+                  onOpenFolder()
+                  setMenuOpen(false)
+                }}
+              >
+                <FolderIcon size={11} className="shrink-0 text-muted" />
+                Open folder…
+              </button>
               <div className="flex items-center gap-1.5 border-t border-line px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted">
                 Tools
                 {installedCommands === null && <SpinnerIcon size={10} />}
@@ -259,9 +319,17 @@ export default function TitleBar({
                     className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
                     onClick={() => {
                       if (installed) {
-                        onAdd('powershell', tool.checkCommand, tool.name, tool.id)
+                        onAdd('powershell', {
+                          initialCommand: tool.checkCommand,
+                          title: tool.name,
+                          logoId: tool.id
+                        })
                       } else {
-                        onAdd('powershell', tool.installCommand, `Install ${tool.name}`, tool.id)
+                        onAdd('powershell', {
+                          initialCommand: tool.installCommand,
+                          title: `Install ${tool.name}`,
+                          logoId: tool.id
+                        })
                       }
                       setMenuOpen(false)
                     }}
@@ -319,6 +387,32 @@ export default function TitleBar({
           <CloseIcon />
         </button>
       </div>
+
+      {tabMenu && (
+        <TabContextMenu
+          x={tabMenu.x}
+          y={tabMenu.y}
+          canCloseOthers={tabs.length > 1}
+          onRename={() => {
+            const tab = tabs.find((t) => t.id === tabMenu.id)
+            if (tab) startRename(tab)
+            setTabMenu(null)
+          }}
+          onDuplicate={() => {
+            onDuplicate(tabMenu.id)
+            setTabMenu(null)
+          }}
+          onClose={() => {
+            onClose(tabMenu.id)
+            setTabMenu(null)
+          }}
+          onCloseOthers={() => {
+            onCloseOthers(tabMenu.id)
+            setTabMenu(null)
+          }}
+          onDismiss={() => setTabMenu(null)}
+        />
+      )}
     </div>
   )
 }

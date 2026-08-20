@@ -7,27 +7,71 @@ import { commitToHistory, getSuggestions } from './suggestions'
 import SuggestionDropdown from './SuggestionDropdown'
 import ContextMenu from './ContextMenu'
 import SearchBar from './SearchBar'
-import { resolveThemeMode, SEARCH_COLORS, TERMINAL_COLORS, type Settings } from './settings'
+import {
+  resolveThemeMode,
+  SEARCH_COLORS,
+  TERMINAL_COLORS,
+  type Settings,
+  type ShellProfile
+} from './settings'
 import { registerPanePty } from './paneProcess'
+import { parseOsc7, registerPaneCwd } from './paneCwd'
+import {
+  advanceAcrossPanes,
+  clearOtherPanes,
+  globalResults,
+  highlightOtherPanes,
+  registerPaneSearch
+} from './paneSearch'
+import type { SearchToggles } from './SearchBar'
 import { CloseIcon } from './Icon'
+
+const DEFAULT_TOGGLES: SearchToggles = {
+  caseSensitive: false,
+  wholeWord: false,
+  regex: false,
+  allPanes: false
+}
 
 /** Search decorations hardcoded to dark-theme hex values would be near
  * invisible in light mode, so derive them from the resolved theme mode
  * instead of a static constant. */
-function getSearchOptions(mode: 'dark' | 'light'): ISearchOptions {
-  return { decorations: SEARCH_COLORS[mode] }
+function getSearchOptions(mode: 'dark' | 'light', toggles: SearchToggles): ISearchOptions {
+  return {
+    decorations: SEARCH_COLORS[mode],
+    caseSensitive: toggles.caseSensitive,
+    wholeWord: toggles.wholeWord,
+    regex: toggles.regex
+  }
+}
+
+/** The addon throws on a malformed pattern, so validate before handing it
+ * over and surface it in the bar rather than letting it blow up mid-type. */
+function isInvalidRegex(query: string, toggles: SearchToggles): boolean {
+  if (!toggles.regex || !query) return false
+  try {
+    new RegExp(query)
+    return false
+  } catch {
+    return true
+  }
 }
 
 interface Props {
   paneId: string
   shellKey: string
   initialCommand?: string
+  /** Directory to start this pane's shell in. */
+  cwd?: string
+  /** Set when shellKey names a user-defined profile, which the main
+   * process can't look up on its own. */
+  customProfile?: ShellProfile
   visible: boolean
   focused: boolean
-  /** Show a per-pane close button — only meaningful once a tab has more
-   * than one pane, since a single-pane tab is already closable via the
-   * tab's own ×. */
-  showCloseButton: boolean
+  /** Whether this pane's tab currently holds more than one pane. Drives
+   * the per-pane close button (a single-pane tab is already closable via
+   * the tab's own ×) and the search bar's "all panes" toggle. */
+  isSplit: boolean
   settings: Settings
   onExit: () => void
   onTitleChange: (title: string) => void
@@ -95,9 +139,11 @@ export default function TerminalView({
   paneId,
   shellKey,
   initialCommand,
+  cwd,
+  customProfile,
   visible,
   focused,
-  showCloseButton,
+  isSplit,
   settings,
   onExit,
   onTitleChange,
@@ -149,7 +195,12 @@ export default function TerminalView({
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [matchInfo, setMatchInfo] = useState({ index: -1, count: 0 })
+  const [searchToggles, setSearchToggles] = useState<SearchToggles>(DEFAULT_TOGGLES)
   const searchRef = useRef<SearchAddon | null>(null)
+  // The addon reports results asynchronously via onDidChangeResults; this
+  // mirror lets the cross-pane coordinator read this pane's latest counts
+  // synchronously, without waiting on a React render.
+  const matchInfoRef = useRef({ index: -1, count: 0 })
 
   const acceptRef = useRef<(index: number) => void>(() => {})
   const markDesyncedRef = useRef<() => void>(() => {})
@@ -279,7 +330,31 @@ export default function TerminalView({
     })
 
     const onSearchResults = search.onDidChangeResults(({ resultIndex, resultCount }) => {
+      matchInfoRef.current = { index: resultIndex, count: resultCount }
       setMatchInfo({ index: resultIndex, count: resultCount })
+    })
+
+    // Exposes this pane's search to the cross-pane coordinator so an
+    // "all panes" search can highlight here and step through these matches
+    // even while the bar itself lives in a different pane.
+    registerPaneSearch(paneId, {
+      highlight: (query, opts) => {
+        search.findNext(query, { ...opts, incremental: true })
+      },
+      findNext: (query, opts) => search.findNext(query, opts),
+      findPrevious: (query, opts) => search.findPrevious(query, opts),
+      clear: () => {
+        search.clearDecorations()
+        matchInfoRef.current = { index: -1, count: 0 }
+      },
+      getResults: () => matchInfoRef.current
+    })
+
+    // Shells report their working directory with OSC 7; tracking it is
+    // what lets a split or duplicate open where this pane actually is.
+    const onCwd = term.parser.registerOscHandler(7, (data) => {
+      registerPaneCwd(paneId, parseOsc7(data))
+      return true
     })
 
     let disposed = false
@@ -347,7 +422,14 @@ export default function TerminalView({
     acceptRef.current = acceptSuggestion
 
     window.api
-      .createSession(shellKey, term.cols, term.rows, initialCommand)
+      .createSession(shellKey, term.cols, term.rows, {
+        cwd,
+        initialCommand,
+        // Read at spawn time only, like the other settings this effect
+        // consumes — toggling it later applies to newly opened panes.
+        cwdTracking: settings.cwdTracking,
+        custom: customProfile
+      })
       .then((id) => {
         if (disposed) {
           window.api.dispose(id)
@@ -458,9 +540,12 @@ export default function TerminalView({
       onTitle.dispose()
       onSearchResults.dispose()
       onBufferChange.dispose()
+      onCwd.dispose()
       offData()
       offExit()
       registerPanePty(paneId, null)
+      registerPaneSearch(paneId, null)
+      registerPaneCwd(paneId, null)
       if (ptyIdRef.current) window.api.dispose(ptyIdRef.current)
       term.dispose()
     }
@@ -565,27 +650,49 @@ export default function TerminalView({
     setContextMenu(null)
   }
 
+  const invalidRegex = isInvalidRegex(searchQuery, searchToggles)
+  const searchOptions = getSearchOptions(resolveThemeMode(settings.themeMode), searchToggles)
+
   useEffect(() => {
     if (!searchOpen) return
-    if (!searchQuery) {
+    if (!searchQuery || invalidRegex) {
       searchRef.current?.clearDecorations()
+      matchInfoRef.current = { index: -1, count: 0 }
       setMatchInfo({ index: -1, count: 0 })
+      clearOtherPanes(paneId)
       return
     }
-    searchRef.current?.findNext(searchQuery, {
-      ...getSearchOptions(resolveThemeMode(settings.themeMode)),
-      incremental: true
-    })
+    searchRef.current?.findNext(searchQuery, { ...searchOptions, incremental: true })
+    // Light up every other pane too, so "all panes" both shows matches
+    // everywhere and gives each pane a count for the global tally.
+    if (searchToggles.allPanes) highlightOtherPanes(paneId, searchQuery, searchOptions)
+    else clearOtherPanes(paneId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery, searchOpen])
+  }, [searchQuery, searchOpen, searchToggles, invalidRegex, paneId])
+
+  const runSearch = (direction: 1 | -1): void => {
+    if (!searchQuery || invalidRegex) return
+    if (
+      searchToggles.allPanes &&
+      advanceAcrossPanes(paneId, direction, searchQuery, searchOptions)
+    ) {
+      return
+    }
+    if (direction === 1) searchRef.current?.findNext(searchQuery, searchOptions)
+    else searchRef.current?.findPrevious(searchQuery, searchOptions)
+  }
 
   const closeSearch = (): void => {
     searchRef.current?.clearDecorations()
+    clearOtherPanes(paneId)
     setSearchOpen(false)
     setSearchQuery('')
+    matchInfoRef.current = { index: -1, count: 0 }
     setMatchInfo({ index: -1, count: 0 })
     termRef.current?.focus()
   }
+
+  const displayedMatches = searchToggles.allPanes ? globalResults(paneId, matchInfo) : matchInfo
 
   return (
     <div
@@ -603,7 +710,7 @@ export default function TerminalView({
       }}
     >
       <div ref={containerRef} className="h-full w-full" />
-      {showCloseButton && (
+      {isSplit && (
         <button
           type="button"
           title="Close pane"
@@ -647,17 +754,15 @@ export default function TerminalView({
       {searchOpen && (
         <SearchBar
           query={searchQuery}
-          matchIndex={matchInfo.index}
-          matchCount={matchInfo.count}
+          matchIndex={displayedMatches.index}
+          matchCount={displayedMatches.count}
+          toggles={searchToggles}
+          canSearchAllPanes={isSplit}
+          invalidRegex={invalidRegex}
           onQueryChange={setSearchQuery}
-          onNext={() =>
-            searchQuery &&
-            searchRef.current?.findNext(searchQuery, getSearchOptions(resolveThemeMode(settings.themeMode)))
-          }
-          onPrev={() =>
-            searchQuery &&
-            searchRef.current?.findPrevious(searchQuery, getSearchOptions(resolveThemeMode(settings.themeMode)))
-          }
+          onTogglesChange={setSearchToggles}
+          onNext={() => runSearch(1)}
+          onPrev={() => runSearch(-1)}
           onClose={closeSearch}
         />
       )}

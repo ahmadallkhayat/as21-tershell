@@ -6,28 +6,58 @@ import {
   findLeaf,
   removeLeaf,
   renameLeaf,
+  reservePaneIds,
   splitLeaf,
   updateSplitSizes,
+  type PaneNode,
   type SplitPane
 } from './paneTree'
 
 describe('createLeaf', () => {
-  it('defaults the title from the shell key', () => {
-    expect(createLeaf('cmd').title).toBe('Command Prompt')
-    expect(createLeaf('powershell').title).toBe('PowerShell')
+  it('falls back to a generic title', () => {
+    expect(createLeaf('cmd').title).toBe('Terminal')
   })
 
-  it('honors an explicit title and logoId', () => {
-    const leaf = createLeaf('powershell', 'claude', 'Claude Code', 'claude-code')
+  it('honors explicit options', () => {
+    const leaf = createLeaf('powershell', {
+      initialCommand: 'claude',
+      title: 'Claude Code',
+      logoId: 'claude-code',
+      cwd: 'C:\\work'
+    })
     expect(leaf.title).toBe('Claude Code')
     expect(leaf.logoId).toBe('claude-code')
     expect(leaf.initialCommand).toBe('claude')
+    expect(leaf.cwd).toBe('C:\\work')
   })
 
   it('assigns each leaf a distinct id', () => {
     const a = createLeaf('powershell')
     const b = createLeaf('powershell')
     expect(a.id).not.toBe(b.id)
+  })
+})
+
+describe('reservePaneIds', () => {
+  it('never reissues an id already present in a restored tree', () => {
+    // Simulates restoring a session whose panes were numbered far above
+    // whatever this process has handed out so far.
+    const restored: PaneNode = {
+      type: 'split',
+      id: 'split-restored',
+      direction: 'row',
+      sizes: [50, 50],
+      children: [
+        { type: 'leaf', id: 'pane-900', shellKey: 'powershell', title: 'a' },
+        { type: 'leaf', id: 'pane-901', shellKey: 'cmd', title: 'b' }
+      ]
+    }
+    reservePaneIds([restored])
+
+    const fresh = createLeaf('powershell')
+    expect(fresh.id).not.toBe('pane-900')
+    expect(fresh.id).not.toBe('pane-901')
+    expect(Number(/^pane-(\d+)$/.exec(fresh.id)![1])).toBeGreaterThan(901)
   })
 })
 

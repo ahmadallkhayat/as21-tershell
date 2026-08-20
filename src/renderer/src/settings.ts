@@ -1,5 +1,19 @@
 export type ThemeMode = 'dark' | 'light' | 'system'
 
+export type ShellFamily = 'powershell' | 'cmd' | 'bash'
+
+export interface ShellProfile {
+  key: string
+  name: string
+  path: string
+  args: string[]
+  family: ShellFamily
+  cwd?: string
+  env?: Record<string, string>
+  color: string
+  supportsCwdTracking: boolean
+}
+
 export interface Settings {
   fontFamily: string
   fontSize: number
@@ -8,6 +22,15 @@ export interface Settings {
   defaultShell: string
   themeMode: ThemeMode
   scrollback: number
+  /** Reopen the previous session's tabs/panes on launch. */
+  restoreSession: boolean
+  /** Inject the shell's OSC 7 prompt hook so splits/duplicates can
+   * inherit the pane's live working directory. */
+  cwdTracking: boolean
+  /** Per-profile starting-directory overrides, keyed by profile key. */
+  profileCwd: Record<string, string>
+  /** User-defined profiles, alongside the auto-detected ones. */
+  customProfiles: ShellProfile[]
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -20,7 +43,11 @@ export const DEFAULT_SETTINGS: Settings = {
   // xterm.js's own default (1000 lines) is small enough that a chatty
   // build or an AI agent's output silently truncates the top of what it
   // printed within a screenful of activity.
-  scrollback: 5000
+  scrollback: 5000,
+  restoreSession: true,
+  cwdTracking: true,
+  profileCwd: {},
+  customProfiles: []
 }
 
 export const FONT_OPTIONS = [
@@ -58,6 +85,16 @@ export function loadSettings(): Settings {
 
 export function saveSettings(settings: Settings): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
+}
+
+/** The profile list the UI actually works with: everything the main
+ * process detected, plus the user's own profiles, with any per-profile
+ * starting-directory override folded in. */
+export function resolveProfiles(detected: ShellProfile[], settings: Settings): ShellProfile[] {
+  return [...detected, ...settings.customProfiles].map((p) => ({
+    ...p,
+    cwd: settings.profileCwd[p.key] || p.cwd
+  }))
 }
 
 export function applyAccentColor(color: string): void {

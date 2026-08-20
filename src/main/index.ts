@@ -1,65 +1,112 @@
-import { app, shell, BrowserWindow, ipcMain, webContents } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, webContents, dialog } from 'electron'
 import { join } from 'path'
 import { is } from './is'
 import os from 'os'
+import { existsSync } from 'fs'
 import * as pty from 'node-pty'
 import type { IPty } from 'node-pty'
 import { getAvailableCommands } from './commands'
+import { getShellProfiles, findProfile, type ShellProfile } from './shells'
 import { loadWindowState, trackWindowState } from './windowState'
 import icon from '../../resources/icon.png?asset'
-
-interface ShellDef {
-  name: string
-  path: string
-  args: string[]
-}
-
-const SHELLS: Record<string, ShellDef> = {
-  powershell: { name: 'PowerShell', path: 'powershell.exe', args: ['-NoLogo'] },
-  cmd: { name: 'Command Prompt', path: process.env.COMSPEC || 'cmd.exe', args: [] }
-}
 
 interface Session {
   proc: IPty
   ownerId: number
 }
 
+interface CreateArgs {
+  shell: string
+  cols: number
+  rows: number
+  cwd?: string
+  initialCommand?: string
+  /** Whether to inject the OSC 7 prompt hook (a user-facing setting). */
+  cwdTracking?: boolean
+  /** A user-defined profile, sent whole since the main process only knows
+   * about the ones it auto-detected. */
+  custom?: ShellProfile
+}
+
 const sessions = new Map<string, Session>()
 let sessionSeq = 0
 
-/** Builds the shell's actual launch args, folding an initial command into
- * shell-native startup flags (`-Command`/`/K`) instead of typing it after
- * the shell is already running. Typing races the shell's own startup —
- * PowerShell in particular can still be printing its banner when the first
- * keystrokes arrive, swallowing or interleaving them. */
-function buildArgs(def: ShellDef, initialCommand?: string): string[] {
-  if (!initialCommand) return def.args
-  if (def.path.toLowerCase().includes('powershell')) {
-    return [...def.args, '-NoExit', '-Command', initialCommand]
-  }
-  return ['/K', initialCommand]
+/** Wraps whatever prompt the user already has so it *also* emits OSC 7 —
+ * the standard "my working directory is now X" escape sequence. That's
+ * what lets a split or duplicated tab inherit the pane's live directory
+ * instead of always landing in the home folder. Capturing the existing
+ * prompt first and calling through to it means a customized prompt
+ * (oh-my-posh, starship, a hand-written one in $PROFILE) keeps working. */
+const POWERSHELL_CWD_INTEGRATION = [
+  '$__as21_prompt = $function:prompt',
+  'function global:prompt {',
+  '  $__as21_p = (Get-Location).ProviderPath',
+  "  if ($__as21_p) { [Console]::Write(\"$([char]27)]7;file:///$($__as21_p -replace '\\\\','/')$([char]7)\") }",
+  '  if ($__as21_prompt) { & $__as21_prompt } else { "PS $(Get-Location)> " }',
+  '}'
+].join('\n')
+
+/** -EncodedCommand takes UTF-16LE base64, which sidesteps command-line
+ * quoting entirely — the integration script above is full of quotes and
+ * backslashes that would otherwise need escaping through two layers. */
+function encodePowerShellCommand(script: string): string {
+  return Buffer.from(script, 'utf16le').toString('base64')
 }
 
-function createSession(
-  shellKey: string,
-  cols: number,
-  rows: number,
-  senderId: number,
-  initialCommand?: string
-): string {
-  const def = SHELLS[shellKey] ?? SHELLS.powershell
+/** Builds the shell's actual launch args, folding an initial command into
+ * shell-native startup flags instead of typing it after the shell is
+ * already running. Typing races the shell's own startup — PowerShell in
+ * particular can still be printing its banner when the first keystrokes
+ * arrive, swallowing or interleaving them. */
+function buildArgs(profile: ShellProfile, initialCommand?: string, cwdTracking?: boolean): string[] {
+  if (profile.family === 'powershell') {
+    const parts: string[] = []
+    if (cwdTracking && profile.supportsCwdTracking) parts.push(POWERSHELL_CWD_INTEGRATION)
+    if (initialCommand) parts.push(initialCommand)
+    if (parts.length === 0) return profile.args
+    return [...profile.args, '-NoExit', '-EncodedCommand', encodePowerShellCommand(parts.join('\n'))]
+  }
+
+  if (profile.family === 'cmd') {
+    return initialCommand ? ['/K', initialCommand] : profile.args
+  }
+
+  // bash-like: run the command, then hand the session back to an
+  // interactive shell rather than exiting the moment it finishes.
+  if (!initialCommand) return profile.args
+  const script = `${initialCommand}; exec bash -i`
+  return /wsl\.exe$/i.test(profile.path)
+    ? [...profile.args, '--', 'bash', '-lc', script]
+    : ['-lc', script]
+}
+
+/** Falls back through requested -> profile default -> home, skipping any
+ * that no longer exist. A restored session can name a directory the user
+ * has since deleted, and spawning into a missing cwd throws. */
+function resolveCwd(profile: ShellProfile, requested?: string): string {
+  for (const candidate of [requested, profile.cwd]) {
+    if (candidate && existsSync(candidate)) return candidate
+  }
+  return os.homedir()
+}
+
+function createSession(profile: ShellProfile, args: CreateArgs, senderId: number): string {
   const id = `pty-${++sessionSeq}`
 
   // Left to throw straight through: ipcMain.handle turns it into a
   // rejection of the renderer's createSession() promise, so a bad shell
   // path or spawn failure surfaces there instead of leaving a tab
   // silently blank.
-  const proc = pty.spawn(def.path, buildArgs(def, initialCommand), {
+  const proc = pty.spawn(profile.path, buildArgs(profile, args.initialCommand, args.cwdTracking), {
     name: 'xterm-256color',
-    cols,
-    rows,
-    cwd: os.homedir(),
-    env: { ...process.env, TERM_PROGRAM: 'AS21Tershell' } as Record<string, string>
+    cols: args.cols,
+    rows: args.rows,
+    cwd: resolveCwd(profile, args.cwd),
+    env: {
+      ...process.env,
+      ...profile.env,
+      TERM_PROGRAM: 'AS21Tershell'
+    } as Record<string, string>
   })
 
   proc.onData((data) => {
@@ -85,13 +132,23 @@ function killSessionsOwnedBy(ownerId: number): void {
   }
 }
 
+async function resolveProfile(args: CreateArgs): Promise<ShellProfile> {
+  if (args.custom) return args.custom
+  const profiles = await getShellProfiles()
+  const match = findProfile(profiles, args.shell)
+  if (match) return match
+  // The saved default shell may name a profile that's since been
+  // uninstalled (or a WSL distro that's been unregistered) — fall back to
+  // whatever this machine does have rather than failing to open a tab.
+  if (profiles.length === 0) throw new Error('No usable shell found on this system')
+  return profiles[0]
+}
+
 function registerPtyHandlers(): void {
-  ipcMain.handle(
-    'pty:create',
-    (event, args: { shell: string; cols: number; rows: number; initialCommand?: string }) => {
-      return createSession(args.shell, args.cols, args.rows, event.sender.id, args.initialCommand)
-    }
-  )
+  ipcMain.handle('pty:create', async (event, args: CreateArgs) => {
+    const profile = await resolveProfile(args)
+    return createSession(profile, args, event.sender.id)
+  })
 
   ipcMain.on('pty:write', (_event, args: { id: string; data: string }) => {
     sessions.get(args.id)?.proc.write(args.data)
@@ -117,11 +174,21 @@ function registerPtyHandlers(): void {
     return sessions.get(args.id)?.proc.process ?? null
   })
 
-  ipcMain.handle('pty:shells', () => {
-    return Object.entries(SHELLS).map(([key, def]) => ({ key, name: def.name }))
-  })
+  ipcMain.handle('shell:profiles', (_event, force?: boolean) => getShellProfiles(force))
 
   ipcMain.handle('shell:commands', (_event, force?: boolean) => getAvailableCommands(force))
+
+  ipcMain.handle('dialog:pickFolder', async (event, defaultPath?: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options = {
+      properties: ['openDirectory' as const],
+      ...(defaultPath && existsSync(defaultPath) ? { defaultPath } : {})
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
 }
 
 /** A renderer reload (dev HMR, Ctrl+R, or a crash) discards all React state
@@ -188,6 +255,7 @@ function createWindow(): void {
 app.whenReady().then(() => {
   registerPtyHandlers()
   getAvailableCommands()
+  getShellProfiles()
   createWindow()
 
   app.on('activate', () => {

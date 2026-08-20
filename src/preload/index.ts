@@ -1,21 +1,41 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-export interface ShellOption {
+export type ShellFamily = 'powershell' | 'cmd' | 'bash'
+
+export interface ShellProfile {
   key: string
   name: string
+  path: string
+  args: string[]
+  family: ShellFamily
+  cwd?: string
+  env?: Record<string, string>
+  color: string
+  supportsCwdTracking: boolean
+}
+
+export interface CreateSessionOptions {
+  cwd?: string
+  initialCommand?: string
+  cwdTracking?: boolean
+  custom?: ShellProfile
 }
 
 const api = {
-  listShells: (): Promise<ShellOption[]> => ipcRenderer.invoke('pty:shells'),
+  listProfiles: (force?: boolean): Promise<ShellProfile[]> =>
+    ipcRenderer.invoke('shell:profiles', force),
 
   listCommands: (force?: boolean): Promise<string[]> => ipcRenderer.invoke('shell:commands', force),
+
+  pickFolder: (defaultPath?: string): Promise<string | null> =>
+    ipcRenderer.invoke('dialog:pickFolder', defaultPath),
 
   createSession: (
     shellKey: string,
     cols: number,
     rows: number,
-    initialCommand?: string
-  ): Promise<string> => ipcRenderer.invoke('pty:create', { shell: shellKey, cols, rows, initialCommand }),
+    options: CreateSessionOptions = {}
+  ): Promise<string> => ipcRenderer.invoke('pty:create', { shell: shellKey, cols, rows, ...options }),
 
   write: (id: string, data: string): void => {
     ipcRenderer.send('pty:write', { id, data })
