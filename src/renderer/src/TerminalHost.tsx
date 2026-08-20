@@ -9,6 +9,7 @@ interface Props {
   leaf: LeafPane
   tabActive: boolean
   focused: boolean
+  isSplit: boolean
   settings: Settings
   actions: PaneActions
 }
@@ -20,7 +21,7 @@ interface Props {
  * recursive pane tree — so splitting/closing sibling panes never affects
  * this component's identity and never remounts the terminal inside it.
  */
-export default function TerminalHost({ leaf, tabActive, focused, settings, actions }: Props): JSX.Element | null {
+export default function TerminalHost({ leaf, tabActive, focused, isSplit, settings, actions }: Props): JSX.Element | null {
   const slot = useSlotElement(leaf.id)
   if (!slot) return null
 
@@ -31,6 +32,7 @@ export default function TerminalHost({ leaf, tabActive, focused, settings, actio
       initialCommand={leaf.initialCommand}
       visible={tabActive}
       focused={focused}
+      showCloseButton={isSplit}
       settings={settings}
       onExit={() => actions.onExit(leaf.id)}
       onTitleChange={(title) => actions.onTitleChange(leaf.id, title)}

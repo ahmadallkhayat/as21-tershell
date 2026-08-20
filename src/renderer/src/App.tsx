@@ -355,12 +355,14 @@ export default function App(): JSX.Element {
         {tabs.flatMap((tab) => {
           const actions = makeActions(tab.id)
           const active = tab.id === activeId
+          const isSplit = countLeaves(tab.root) > 1
           return collectLeaves(tab.root).map((leaf) => (
             <TerminalHost
               key={leaf.id}
               leaf={leaf}
               tabActive={active}
               focused={active && leaf.id === tab.focusedPaneId}
+              isSplit={isSplit}
               settings={settings}
               actions={actions}
             />

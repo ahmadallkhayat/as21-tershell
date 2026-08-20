@@ -9,6 +9,7 @@ import ContextMenu from './ContextMenu'
 import SearchBar from './SearchBar'
 import { resolveThemeMode, SEARCH_COLORS, TERMINAL_COLORS, type Settings } from './settings'
 import { registerPanePty } from './paneProcess'
+import { CloseIcon } from './Icon'
 
 /** Search decorations hardcoded to dark-theme hex values would be near
  * invisible in light mode, so derive them from the resolved theme mode
@@ -23,6 +24,10 @@ interface Props {
   initialCommand?: string
   visible: boolean
   focused: boolean
+  /** Show a per-pane close button — only meaningful once a tab has more
+   * than one pane, since a single-pane tab is already closable via the
+   * tab's own ×. */
+  showCloseButton: boolean
   settings: Settings
   onExit: () => void
   onTitleChange: (title: string) => void
@@ -92,6 +97,7 @@ export default function TerminalView({
   initialCommand,
   visible,
   focused,
+  showCloseButton,
   settings,
   onExit,
   onTitleChange,
@@ -597,6 +603,16 @@ export default function TerminalView({
       }}
     >
       <div ref={containerRef} className="h-full w-full" />
+      {showCloseButton && (
+        <button
+          type="button"
+          title="Close pane"
+          className="absolute right-3 top-3 z-10 flex h-5 w-5 items-center justify-center rounded text-muted hover:bg-hover-strong hover:text-fg"
+          onClick={() => onCloseTabRef.current()}
+        >
+          <CloseIcon size={10} />
+        </button>
+      )}
       {dropdown && (
         <SuggestionDropdown
           items={dropdown.items}
