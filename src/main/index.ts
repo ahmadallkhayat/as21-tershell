@@ -231,6 +231,15 @@ function createWindow(): void {
   trackWindowState(win)
   reapSessionsOnReload(win)
 
+  // Surface renderer-side errors in the terminal running `npm run dev`.
+  // Without this a React render error just blanks the window silently,
+  // with nothing to go on unless DevTools happens to be open.
+  if (is.dev) {
+    win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+      if (level >= 2) console.error(`[renderer] ${message}  (${sourceId}:${line})`)
+    })
+  }
+
   win.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }

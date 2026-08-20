@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom'
 import type { LeafPane } from './paneTree'
 import type { PaneActions } from './PaneView'
 import type { Settings, ShellProfile } from './settings'
-import { useSlotElement } from './paneSlots'
+import { slotStore } from './paneSlots'
 import TerminalView from './TerminalView'
 
 interface Props {
@@ -32,9 +32,10 @@ export default function TerminalHost({
   customProfile,
   settings,
   actions
-}: Props): JSX.Element | null {
-  const slot = useSlotElement(leaf.id)
-  if (!slot) return null
+}: Props): JSX.Element {
+  // Stable for the life of the pane, so the portal below is never rebuilt
+  // and the terminal inside it survives any layout change.
+  const slot = slotStore.acquire(leaf.id)
 
   return createPortal(
     <TerminalView

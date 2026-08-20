@@ -255,116 +255,123 @@ export default function TitleBar({
             </div>
           ))}
         </div>
-        <div className="relative shrink-0 [-webkit-app-region:no-drag]" ref={menuRef}>
-          <button
-            type="button"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-accent-soft hover:text-accent"
-            title="New tab"
-            onClick={() => setMenuOpen((v) => !v)}
-          >
-            <PlusIcon />
-          </button>
-          {menuOpen && (
-            <div
-              ref={menuPopupRef}
-              role="menu"
-              className="absolute left-0 top-full z-10 mt-1 w-max overflow-hidden rounded-md border border-hover-strong bg-hover shadow-lg"
+        {/* Tab/app actions, kept together and clear of the window controls. */}
+        <div className="flex shrink-0 items-center gap-1">
+          <div className="relative shrink-0 [-webkit-app-region:no-drag]" ref={menuRef}>
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              className="flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-accent-soft hover:text-accent"
+              title="New tab"
+              onClick={() => setMenuOpen((v) => !v)}
             >
-              {profiles.map((profile) => (
-                <button
-                  key={profile.key}
-                  type="button"
-                  role="menuitem"
-                  className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
-                  onClick={() => {
-                    onAdd(profile.key, { title: profile.name })
-                    setMenuOpen(false)
-                  }}
-                >
-                  <span
-                    className="h-1.5 w-1.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: profile.color }}
-                  />
-                  {profile.name}
-                </button>
-              ))}
-              <div className="border-t border-line" />
-              <button
-                type="button"
-                role="menuitem"
-                className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
-                onClick={() => {
-                  onOpenFolder()
-                  setMenuOpen(false)
-                }}
+              <PlusIcon />
+            </button>
+            {menuOpen && (
+              <div
+                ref={menuPopupRef}
+                role="menu"
+                className="scroll-custom absolute left-0 top-full z-10 mt-1 max-h-[70vh] w-max overflow-y-auto rounded-md border border-hover-strong bg-hover shadow-lg"
               >
-                <FolderIcon size={11} className="shrink-0 text-muted" />
-                Open folder…
-              </button>
-              <div className="flex items-center gap-1.5 border-t border-line px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted">
-                Tools
-                {installedCommands === null && <SpinnerIcon size={10} />}
-              </div>
-              {TOOLS.map((tool) => {
-                const checking = installedCommands === null
-                const installed = !checking && installedCommands.includes(tool.checkCommand)
-                const LogoIcon = toolLogo(tool.id)
-                return (
+                {profiles.map((profile) => (
                   <button
-                    key={tool.id}
+                    key={profile.key}
                     type="button"
                     role="menuitem"
                     className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
                     onClick={() => {
-                      if (installed) {
-                        onAdd('powershell', {
-                          initialCommand: tool.checkCommand,
-                          title: tool.name,
-                          logoId: tool.id
-                        })
-                      } else {
-                        onAdd('powershell', {
-                          initialCommand: tool.installCommand,
-                          title: `Install ${tool.name}`,
-                          logoId: tool.id
-                        })
-                      }
+                      onAdd(profile.key, { title: profile.name })
                       setMenuOpen(false)
                     }}
                   >
-                    <LogoIcon
-                      className={`h-3 w-3 shrink-0 ${
-                        checking ? 'animate-pulse text-hover-strong' : installed ? 'text-accent' : 'text-hover-strong'
-                      }`}
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: profile.color }}
                     />
-                    <span className={`flex-1 ${checking ? 'animate-pulse' : ''}`}>{tool.name}</span>
-                    {checking ? (
-                      <SpinnerIcon size={10} className="text-muted" />
-                    ) : (
-                      !installed && (
-                        <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted">
-                          <DownloadIcon size={10} />
-                          Install
-                        </span>
-                      )
-                    )}
+                    {profile.name}
                   </button>
-                )
-              })}
-            </div>
-          )}
+                ))}
+                <div className="border-t border-line" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
+                  onClick={() => {
+                    onOpenFolder()
+                    setMenuOpen(false)
+                  }}
+                >
+                  <FolderIcon size={11} className="shrink-0 text-muted" />
+                  Open folder…
+                </button>
+                <div className="flex items-center gap-1.5 border-t border-line px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted">
+                  Tools
+                  {installedCommands === null && <SpinnerIcon size={10} />}
+                </div>
+                {TOOLS.map((tool) => {
+                  const checking = installedCommands === null
+                  const installed = !checking && installedCommands.includes(tool.checkCommand)
+                  const LogoIcon = toolLogo(tool.id)
+                  return (
+                    <button
+                      key={tool.id}
+                      type="button"
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-xs text-fg hover:bg-accent-soft"
+                      onClick={() => {
+                        if (installed) {
+                          onAdd('powershell', {
+                            initialCommand: tool.checkCommand,
+                            title: tool.name,
+                            logoId: tool.id
+                          })
+                        } else {
+                          onAdd('powershell', {
+                            initialCommand: tool.installCommand,
+                            title: `Install ${tool.name}`,
+                            logoId: tool.id
+                          })
+                        }
+                        setMenuOpen(false)
+                      }}
+                    >
+                      <LogoIcon
+                        className={`h-3 w-3 shrink-0 ${
+                          checking ? 'animate-pulse text-hover-strong' : installed ? 'text-accent' : 'text-hover-strong'
+                        }`}
+                      />
+                      <span className={`flex-1 ${checking ? 'animate-pulse' : ''}`}>{tool.name}</span>
+                      {checking ? (
+                        <SpinnerIcon size={10} className="text-muted" />
+                      ) : (
+                        !installed && (
+                          <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted">
+                            <DownloadIcon size={10} />
+                            Install
+                          </span>
+                        )
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted hover:bg-accent-soft hover:text-accent [-webkit-app-region:no-drag]"
+            title="Settings"
+            onClick={onOpenSettings}
+          >
+            <GearIcon />
+          </button>
         </div>
       </div>
+      {/* Window controls only — Settings lives with the tab actions on the
+          left, since it's an app action, not window chrome, and sitting
+          next to Close made it easy to hit by mistake. */}
       <div className="flex h-full shrink-0 [-webkit-app-region:no-drag]">
-        <button
-          className="flex h-full w-11 items-center justify-center text-muted hover:bg-hover hover:text-bright"
-          title="Settings"
-          onClick={onOpenSettings}
-        >
-          <GearIcon />
-        </button>
         <button
           className="flex h-full w-11 items-center justify-center text-muted hover:bg-hover hover:text-bright"
           title="Minimize"

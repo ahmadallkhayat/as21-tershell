@@ -418,6 +418,13 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [tabs.length, newTab])
 
+  // Pane containers outlive individual React components on purpose (see
+  // paneSlots.ts), so they're reclaimed here, by comparing against the
+  // panes that actually still exist, rather than on unmount.
+  useEffect(() => {
+    slotStore.retainOnly(new Set(tabs.flatMap((t) => collectLeaves(t.root).map((l) => l.id))))
+  }, [tabs])
+
   const activeTab = tabs.find((t) => t.id === activeId)
 
   // Cross-pane search needs to know the active tab's pane order (to step

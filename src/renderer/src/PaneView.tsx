@@ -1,4 +1,4 @@
-import { Fragment, useRef } from 'react'
+import { Fragment, useEffect, useRef } from 'react'
 import type { PaneNode } from './paneTree'
 import { slotStore } from './paneSlots'
 
@@ -80,14 +80,47 @@ function Divider({
  * leaf's own div can come and go, but the pane id — and the portaled
  * TerminalView/xterm/PTY behind it — never does.
  */
+/**
+ * A pane's position in the layout. Renders an empty host div and re-parents
+ * that pane's long-lived container (see paneSlots.ts) into it — the host
+ * div is React's to recreate as the tree reshapes, while the container it
+ * holds, and the live terminal inside it, are carried across untouched.
+ */
+function PaneSlot({
+  paneId,
+  focused,
+  onFocus
+}: {
+  paneId: string
+  focused: boolean
+  onFocus: () => void
+}): JSX.Element {
+  const hostRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const node = slotStore.acquire(paneId)
+    // A no-op when it's already here; a move when the layout changed.
+    if (node.parentElement !== host) host.appendChild(node)
+  })
+
+  return (
+    <div
+      ref={hostRef}
+      className={`relative min-h-0 min-w-0 flex-1 ${focused ? 'ring-1 ring-inset ring-accent' : ''}`}
+      onMouseDown={onFocus}
+    />
+  )
+}
+
 export default function PaneView({ node, tabActive, focusedPaneId, actions }: Props): JSX.Element {
   if (node.type === 'leaf') {
-    const focused = tabActive && node.id === focusedPaneId
     return (
-      <div
-        ref={(el) => slotStore.register(node.id, el)}
-        className={`relative min-h-0 min-w-0 flex-1 ${focused ? 'ring-1 ring-inset ring-accent' : ''}`}
-        onMouseDown={() => actions.onFocus(node.id)}
+      <PaneSlot
+        paneId={node.id}
+        focused={tabActive && node.id === focusedPaneId}
+        onFocus={() => actions.onFocus(node.id)}
       />
     )
   }

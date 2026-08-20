@@ -104,25 +104,46 @@ body {
   cursor: grabbing;
 }
 
+/* The app's scrollbar. Applied via `.scroll-custom` anywhere we own the
+   markup, and by selector to xterm's viewport, which xterm creates itself
+   and so can't be given a class. Anything scrollable must opt in — an
+   element left with plain `overflow: auto` renders the stock Chromium
+   scrollbar, which looks nothing like the rest of the chrome. */
+.scroll-custom,
 .terminal-container .xterm-viewport {
   scrollbar-width: thin;
   scrollbar-color: var(--color-hover-strong) transparent;
 }
 
+.scroll-custom::-webkit-scrollbar,
 .terminal-container .xterm-viewport::-webkit-scrollbar {
   width: 10px;
+  height: 10px;
 }
 
+.scroll-custom::-webkit-scrollbar-track,
 .terminal-container .xterm-viewport::-webkit-scrollbar-track {
   background: transparent;
 }
 
+.scroll-custom::-webkit-scrollbar-corner,
+.terminal-container .xterm-viewport::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* The inset comes from a transparent border clipped to the padding box,
+   rather than a border painted in the surface color — so the same thumb
+   sits correctly on the terminal, on panels, and on menus, which all have
+   different backgrounds. */
+.scroll-custom::-webkit-scrollbar-thumb,
 .terminal-container .xterm-viewport::-webkit-scrollbar-thumb {
   background-color: var(--color-hover-strong);
   border-radius: 6px;
-  border: 2px solid var(--color-surface);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
+.scroll-custom::-webkit-scrollbar-thumb:hover,
 .terminal-container .xterm-viewport::-webkit-scrollbar-thumb:hover {
   background-color: var(--color-accent);
 }

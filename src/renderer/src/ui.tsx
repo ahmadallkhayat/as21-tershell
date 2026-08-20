@@ -138,7 +138,7 @@ export function Select({ value, options, onChange, minWidth = 150 }: SelectProps
             ref={popupRef}
             id={listboxId}
             role="listbox"
-            className="fixed z-[60] overflow-hidden rounded-md border border-hover-strong bg-titlebar py-1 shadow-[0_16px_40px_rgba(0,0,0,0.5)]"
+            className="scroll-custom fixed z-[60] max-h-[280px] overflow-y-auto rounded-md border border-hover-strong bg-titlebar py-1 shadow-[0_16px_40px_rgba(0,0,0,0.5)]"
             style={{ left: anchor.left, top: anchor.top, minWidth: Math.max(anchor.width, minWidth) }}
           >
             {options.map((option) => (

@@ -188,7 +188,7 @@ export default function SettingsPanel({ settings, profiles, onChange, onClose }:
           </button>
         </div>
 
-        <div className="max-h-[70vh] overflow-y-auto px-4 pb-4">
+        <div className="scroll-custom max-h-[70vh] overflow-y-auto px-4 pb-4">
           <SectionLabel>Appearance</SectionLabel>
 
           <Field label="Theme">

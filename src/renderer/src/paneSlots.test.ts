@@ -1,78 +1,67 @@
-import { describe, expect, it, vi } from 'vitest'
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it } from 'vitest'
 import { slotStore } from './paneSlots'
 
-function fakeEl(): HTMLElement {
-  return {} as HTMLElement
-}
+beforeEach(() => {
+  slotStore.retainOnly(new Set())
+  document.body.innerHTML = ''
+})
 
 describe('slotStore', () => {
-  it('notifies subscribers when a slot is registered', () => {
-    const listener = vi.fn()
-    const unsub = slotStore.subscribe(listener)
-    const el = fakeEl()
-    slotStore.register('pane-notify', el)
-    expect(slotStore.get('pane-notify')).toBe(el)
-    expect(listener).toHaveBeenCalledTimes(1)
-    unsub()
+  it('returns the same container for a pane every time', () => {
+    const first = slotStore.acquire('pane-1')
+    expect(slotStore.acquire('pane-1')).toBe(first)
+    expect(slotStore.acquire('pane-2')).not.toBe(first)
   })
 
-  it('keeps a slot alive across a same-commit detach+reattach (the split-restart race)', async () => {
-    const oldEl = fakeEl()
-    const newEl = fakeEl()
-    slotStore.register('pane-move', oldEl)
-
-    // Simulates what React does when a leaf's position in the tree moves:
-    // the old div's ref fires with null, then — synchronously, in the same
-    // commit — the new div's ref fires with an element. A subscriber must
-    // never observe "no slot" in between, or it unmounts the portaled
-    // terminal (this was the actual bug behind "splitting restarts the
-    // terminal").
-    slotStore.register('pane-move', null)
-    slotStore.register('pane-move', newEl)
-
-    expect(slotStore.get('pane-move')).toBe(newEl)
-
-    await Promise.resolve() // flush the deferred-delete microtask
-    expect(slotStore.get('pane-move')).toBe(newEl)
+  it('gives each container a positioned, full-bleed box', () => {
+    const node = slotStore.acquire('pane-1')
+    expect(node.style.position).toBe('absolute')
+    expect(node.style.inset).toBe('0px')
   })
 
-  it('survives a StrictMode remount that reattaches the same element', async () => {
-    // React StrictMode simulates an unmount/remount by detaching and
-    // reattaching the very same DOM node. An earlier version keyed the
-    // deferred delete on element identity, so the reattach was a no-op
-    // early-return and the delete still fired — stranding the pane with no
-    // slot, hence no terminal and no pty at all.
-    const el = fakeEl()
-    slotStore.register('pane-strict', el)
-    slotStore.register('pane-strict', null)
-    slotStore.register('pane-strict', el)
+  /**
+   * The invariant the whole design rests on. React's createPortal unmounts
+   * and rebuilds its subtree whenever its container changes, so a pane's
+   * container object must survive being moved between hosts — otherwise
+   * splitting tears down xterm and kills the pty ("split makes it empty").
+   */
+  it('keeps the container object and its contents across a re-parent', () => {
+    const container = slotStore.acquire('pane-1')
+    const terminal = document.createElement('canvas')
+    container.appendChild(terminal)
 
-    expect(slotStore.get('pane-strict')).toBe(el)
-    await Promise.resolve()
-    expect(slotStore.get('pane-strict')).toBe(el)
+    const firstHost = document.createElement('div')
+    document.body.appendChild(firstHost)
+    firstHost.appendChild(container)
+
+    // Simulates a split: the pane is now represented by a brand-new host
+    // div nested deeper in the layout tree.
+    const deeperHost = document.createElement('div')
+    document.body.appendChild(deeperHost)
+    deeperHost.appendChild(slotStore.acquire('pane-1'))
+
+    expect(slotStore.acquire('pane-1')).toBe(container)
+    expect(container.parentElement).toBe(deeperHost)
+    expect(container.firstChild).toBe(terminal)
+    expect(firstHost.childElementCount).toBe(0)
   })
 
-  it('still deletes after a detach even once the id has been reused before', async () => {
-    const el = fakeEl()
-    slotStore.register('pane-cycle', el)
-    slotStore.register('pane-cycle', null)
-    slotStore.register('pane-cycle', el)
-    await Promise.resolve()
+  it('retainOnly drops containers for panes that are gone', () => {
+    const kept = slotStore.acquire('pane-keep')
+    slotStore.acquire('pane-drop')
 
-    // A genuine removal after that cycle must still take effect.
-    slotStore.register('pane-cycle', null)
-    await Promise.resolve()
-    expect(slotStore.get('pane-cycle')).toBeUndefined()
+    slotStore.retainOnly(new Set(['pane-keep']))
+
+    expect(slotStore.get('pane-keep')).toBe(kept)
+    expect(slotStore.get('pane-drop')).toBeUndefined()
+    // Re-acquiring a kept pane must not mint a replacement.
+    expect(slotStore.acquire('pane-keep')).toBe(kept)
   })
 
-  it('actually removes a slot that is never re-registered', async () => {
-    const el = fakeEl()
-    slotStore.register('pane-gone', el)
-    slotStore.register('pane-gone', null)
-    // Still present synchronously — deletion is deferred.
-    expect(slotStore.get('pane-gone')).toBe(el)
-
-    await Promise.resolve()
-    expect(slotStore.get('pane-gone')).toBeUndefined()
+  it('hands out a fresh container after a pane is released', () => {
+    const original = slotStore.acquire('pane-1')
+    slotStore.retainOnly(new Set())
+    expect(slotStore.acquire('pane-1')).not.toBe(original)
   })
 })
