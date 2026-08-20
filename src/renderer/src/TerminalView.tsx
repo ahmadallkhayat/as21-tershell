@@ -121,24 +121,25 @@ function isRenderReady(term: Terminal | null): boolean {
       term as unknown as {
         _core?: {
           _renderService?: {
-            _renderer?: { value?: unknown }
-            dimensions?: {
-              css?: { cell?: { height?: number; width?: number } }
-              actualCellWidth?: number
-              actualCellHeight?: number
+            _renderer?: {
+              value?: {
+                dimensions?: {
+                  css?: { cell?: { height?: number; width?: number } }
+                  actualCellWidth?: number
+                  actualCellHeight?: number
+                }
+              }
             }
           }
         }
       }
     )._core
-    const dims = core?._renderService?.dimensions
+    const renderer = core?._renderService?._renderer?.value
+    if (!renderer) return false
+    const dims = renderer.dimensions
     const cellH = dims?.css?.cell?.height ?? 0
     const cellW = dims?.css?.cell?.width ?? 0
-    return Boolean(
-      core?._renderService?._renderer?.value &&
-        cellH > 0 &&
-        cellW > 0
-    )
+    return cellH > 0 && cellW > 0
   } catch {
     return false
   }
@@ -336,11 +337,23 @@ export default function TerminalView({
     term.loadAddon(search)
     term.loadAddon(webLinks)
     searchRef.current = search
-    term.open(container)
-    requestAnimationFrame(() => {
-      safeFit(fit, term, container)
-      if (focused) safeFocus(term, container)
-    })
+    if (container.isConnected) {
+      term.open(container)
+      requestAnimationFrame(() => {
+        safeFit(fit, term, container)
+        if (focused) safeFocus(term, container)
+      })
+    } else {
+      requestAnimationFrame(() => {
+        if (!disposed && container.isConnected) {
+          term.open(container)
+          requestAnimationFrame(() => {
+            safeFit(fit, term, container)
+            if (focused) safeFocus(term, container)
+          })
+        }
+      })
+    }
 
     termRef.current = term
     fitRef.current = fit
